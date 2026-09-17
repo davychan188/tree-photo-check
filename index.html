@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>四張相片完整性對比</title>
+<style>
+:root{--g:#14532d;--bg:#f3f6f3;--line:#d5e0d5;--ok:#166534;--miss:#b45309;--bad:#b91c1c;--info:#1e40af}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","PingFang HK",sans-serif;background:var(--bg);color:#0f172a}
+header{background:var(--g);color:#fff;padding:16px 20px}
+header h1{margin:0;font-size:18px}
+header p{margin:4px 0 0;opacity:.85;font-size:13px}
+.wrap{max-width:1200px;margin:0 auto;padding:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+textarea{width:100%;min-height:200px;border:1px solid var(--line);border-radius:10px;padding:10px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace}
+label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+.opts{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:13px;margin:10px 0 14px}
+.btn{border:0;background:var(--g);color:#fff;font-weight:800;padding:10px 14px;border-radius:12px;cursor:pointer;font-size:14px}
+.btn2{background:#e2e8f0;color:#334155}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:#fff;border-radius:12px;padding:12px;text-align:center}
+.kpi b{display:block;font-size:22px;color:var(--g)}
+.kpi span{font-size:12px;color:#64748b}
+.col{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;font:12px/1.5 ui-monospace,Menlo,monospace;background:#fafdfa;white-space:pre-wrap}
+h3{margin:8px 0;font-size:14px}
+.ok{color:var(--ok)}.miss{color:var(--miss)}.extra{color:var(--bad)}.info{color:var(--info)}
+.hint{font-size:12px;color:#64748b;font-weight:400;margin-top:4px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:8px;margin-top:8px;background:#f8faf8;font-size:12px;color:#475569;text-align:center}
+.drop.over{border-color:var(--g);background:#ecfdf3}
+.drop input{display:none}
+.mtxwrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
+table.mtx{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
+table.mtx th,table.mtx td{border:1px solid var(--line);padding:6px 8px;text-align:center;white-space:nowrap}
+table.mtx th{background:#ecf3ec;position:sticky;top:0}
+table.mtx td.id{text-align:left;font-family:ui-monospace,Menlo,monospace;font-weight:700}
+table.mtx tr:nth-child(even){background:#fafdfa}
+.cell-ok{background:#dcfce7;color:#166534;font-weight:700}
+.cell-no{background:#fee2e2;color:#991b1b;font-weight:700}
+.cell-more{background:#ffedd5;color:#9a3412}
+.cell-oth{background:#e0e7ff;color:#1e3a8a}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tab{border:0;background:#e2e8f0;border-radius:999px;padding:6px 12px;cursor:pointer;font-size:13px}
+.tab.on{background:var(--g);color:#fff;font-weight:700}
+.panel{display:none}
+.panel.on{display:block}
+.fmt-choice{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fafdfa}
+.fmt-choice label{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.fmt-choice .sub{font-size:12px;color:#64748b;margin:6px 0 0 24px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap}
+.fmt-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>四張相片完整性對比</h1>
+  <p>名單 1 = 樹編號；名單 2 = 相片檔名。可拖資料夾入去。標準四張：Tag、Whole view、Trunk base、Crown。</p>
+</header>
+<div class="wrap">
+  <div class="opts">
+    <label><input type="checkbox" id="slashHSW"/> 把 H/SW 當成 HSW</label>
+    <label><input type="checkbox" id="onlyFromA" checked/> 只檢查名單 1 內的樹</label>
+    <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
+    <label><input type="checkbox" id="showUnknown" checked/> 顯示其他角度／過濾掉的檔</label>
+    <label><input type="checkbox" id="showFmt" checked/> 顯示數字後格式差異</label>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <label>第一堆（1）樹編號</label>
+      <textarea id="listA" placeholder="T28&#10;T30&#10;TY-A0001"></textarea>
+      <div class="drop" id="dropA">拖樹號 .txt／檔案到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" multiple onchange="filesToBox(event,'listA',false)">選檔</label></div>
+      <div class="hint">一行一個編號</div>
+    </div>
+    <div class="card">
+      <label>第二堆（2）相片檔名</label>
+      <textarea id="listB" placeholder="T28_Tag.jpg&#10;T28_Whole view.jpg"></textarea>
+      <div class="drop" id="dropB">拖相片／資料夾到此（只讀檔名，不上載），或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" multiple webkitdirectory directory onchange="filesToBox(event,'listB',true)">選資料夾</label>
+      ／ <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listB',true)">選檔</label></div>
+      <div class="hint">支援 T28_Crown、AT-0349 Whole view、TY-A0001_Tag</div>
+    </div>
+  </div>
+  <div class="btns">
+    <button class="btn" onclick="run()">檢查</button>
+    <button class="btn btn2" onclick="copyShort()">複製欠相短訊</button>
+    <button class="btn btn2" onclick="dlMissing()">欠相清單</button>
+    <button class="btn btn2" onclick="dlRename()">改名 CSV</button>
+    <button class="btn btn2" onclick="dlBat()">改名 BAT</button>
+    <button class="btn btn2" onclick="dl()">完整 CSV</button>
+    <button class="btn btn2" onclick="swap()">對調 1/2</button>
+    <button class="btn btn2" onclick="clearAll()">清空</button>
+  </div>
+  <div class="kpis" id="kpis"></div>
+  <div class="tabs">
+    <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣預覽</button>
+    <button class="tab" data-p="lists" onclick="tab(this)">清單</button>
+    <button class="tab" data-p="rename" onclick="tab(this)">建議改名</button>
+    <button class="tab" data-p="fmt" onclick="tab(this)">數字後格式</button>
+  </div>
+  <div id="p-matrix" class="panel on"></div>
+  <div id="p-lists" class="panel"></div>
+  <div id="p-rename" class="panel"></div>
+  <div id="p-fmt" class="panel"></div>
+</div>
+<script>
+const NEED = ["Tag", "Whole view", "Trunk base", "Crown"];
+const JUNK_NAME = /^(thumbs\.db|desktop\.ini|\.ds_store|ehthumbs\.db|icon\r)$/i;
+
+function sortId(a,b){ return String(a).localeCompare(String(b),"en",{numeric:true}); }
+function extOf(line){ const m=String(line).trim().match(/(\.[A-Za-z0-9]{1,5})$/); return m?m[1].toLowerCase():""; }
+function stripExt(s){
+  s = String(s).replace(/\\/g,"/").split("/").pop();
+  return s.replace(/(\.[A-Za-z0-9]{1,5})+$/i, "");
+}
+function normId(s, slash){
+  s = s.trim().toUpperCase();
+  if(!s) return "";
+  if(slash) s = s.replace(/H\/SW/g,"HSW");
+  return s;
+}
+function isJunk(name){
+  const base = name.replace(/\\/g,"/").split("/").pop();
+  if(!base) return "empty";
+  if(base.startsWith("._")) return "AppleDouble";
+  if(base.startsWith(".")) return "隱藏檔";
+  if(JUNK_NAME.test(base)) return "系統檔";
+  if(/\.(jpe?g|png|heic|heif|webp|gif|bmp|tif|tiff)\.(jpe?g|png|heic|heif|webp)$/i.test(base)) return "重複副檔名";
+  return "";
+}
+function extractTreeId(line, slash){
+  let s = stripExt(normId(line, slash));
+  if(!s) return "";
+  // T28_Tag / T28A_Tag keep optional letter; T21WHOLEVIEW (no separator) stays T21
+  let m = s.match(/^(TE\d+|T\d+(?:[A-Z](?=[_\-\s]|$))?)(?=[_\-\s]|$|[A-Z])/);
+  if(m){
+    let id = m[1];
+    if(/^TE\d+$/.test(id)) id = "TE" + id.slice(2).padStart(3,"0");
+    return id;
+  }
+  m = s.match(/^([A-Z0-9\/]+-[A-Z0-9]+)/);
+  if(m) return m[1];
+  return s.split(/[\s_]/)[0];
+}
+function restAfterId(raw, id){
+  const up = raw.toUpperCase();
+  const idUp = (id||"").toUpperCase();
+  if(idUp && up.startsWith(idUp)) return raw.slice(idUp.length);
+  if(idUp){
+    const i = up.indexOf(idUp);
+    if(i>=0) return raw.slice(i+idUp.length);
+  }
+  return raw;
+}
+function prettyDesc(s){
+  return s.replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim()
+    .toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+function classifyType(line, slash){
+  const raw = stripExt(line.trim());
+  const id = extractTreeId(raw, slash);
+  const rest = restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
+  const r = rest.toUpperCase().replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim();
+  if(!r) return {id, type:"Unknown", desc:""};
+  if(r === "TAG") return {id, type:"Tag", desc:rest};
+  if(r === "WHOLE VIEW" || r === "WHOLEVIEW" || r === "WHOLE") return {id, type:"Whole view", desc:rest};
+  if(r === "TRUNK BASE" || r === "TRUNKBASE") return {id, type:"Trunk base", desc:rest};
+  if(r === "CROWN") return {id, type:"Crown", desc:rest};
+  return {id, type:prettyDesc(rest), desc:rest};
+}
+function formatOf(line, id){
+  const raw = stripExt(line.trim());
+  let after = restAfterId(raw, id);
+  let join = "";
+  if(after.startsWith("_")) join = "_";
+  else if(after.startsWith("-")) join = "-";
+  else if(/^\s/.test(after)) join = " ";
+  const typeFmt = after.replace(/^[\s_\-]+/, "").replace(/\s+/g," ").trim() || "(無角度)";
+  const tail = join + typeFmt;
+  return {key: tail.toUpperCase(), label: tail || "(空)", join, typeFmt};
+}
+function parseTrees(text, slash){
+  const rows=[], cnt={};
+  for(const raw of text.split(/\r?\n/)){
+    const id = extractTreeId(raw, slash);
+    if(!id) continue;
+    rows.push(id);
+    cnt[id]=(cnt[id]||0)+1;
+  }
+  const uniq = Object.keys(cnt).sort(sortId);
+  return {rows, uniq, cnt, dups: uniq.filter(k=>cnt[k]>1)};
+}
+
+function parsePhotos(text, slash, filterJunk){
+  const items=[], unknown=[], junk=[], byTree={};
+  const fileCnt={}, extCnt={};
+  for(const raw of text.split(/\r?\n/)){
+    let line = raw.trim();
+    if(!line) continue;
+    line = line.replace(/\\/g,"/").split("/").pop();
+    const why = isJunk(line);
+    if(why){
+      junk.push(why + " ← " + line);
+      if(filterJunk) continue;
+    }
+    const ext = extOf(line) || "(無)";
+    extCnt[ext]=(extCnt[ext]||0)+1;
+    const key = line.toUpperCase();
+    fileCnt[key]=fileCnt[key]||{n:0,sample:line};
+    fileCnt[key].n++;
+    const {id, type} = classifyType(line, slash);
+    if(!id){ unknown.push(line); continue; }
+    if(!byTree[id]) byTree[id]={types:new Set(), typeCnt:{}, files:[], extras:[], byNeed:{}};
+    byTree[id].files.push(line);
+    byTree[id].typeCnt[type]=(byTree[id].typeCnt[type]||0)+1;
+    if(NEED.includes(type)){
+      byTree[id].types.add(type);
+      byTree[id].byNeed[type]=byTree[id].byNeed[type]||[];
+      byTree[id].byNeed[type].push(line);
+    }else{
+      byTree[id].extras.push(type + " ← " + line);
+    }
+    items.push({id, type, line, ext, fmt: formatOf(line, id)});
+  }
+
+  const fmtByType={};
+  for(const it of items){
+    const tk=it.type, k=it.fmt.key;
+    if(!fmtByType[tk]) fmtByType[tk]={};
+    if(!fmtByType[tk][k]) fmtByType[tk][k]={label:it.fmt.label, join:it.fmt.join, typeFmt:it.fmt.typeFmt, n:0, files:[], trees:{}};
+    const g=fmtByType[tk][k];
+    g.n++; g.files.push(it.line);
+    g.trees[it.id]=(g.trees[it.id]||0)+1;
+  }
+
+  const majorityTail={};
+  const combined=[], minorityFiles=[], fmtAlts=[];
+  for(const t of Object.keys(fmtByType).sort(sortId)){
+    const groups=Object.values(fmtByType[t]).sort((a,b)=>b.n-a.n||sortId(a.label,b.label));
+    const top=groups[0];
+    majorityTail[t]=top;
+    const hasAlt=groups.length>1;
+    const dups=[];
+    groups.forEach(g=>Object.keys(g.trees).sort(sortId).forEach(id=>{
+      if(g.trees[id]>1) dups.push(id+" 「"+g.label+"」×"+g.trees[id]);
+    }));
+    if(hasAlt || dups.length){
+      const lines=["【"+t+"】"];
+      groups.forEach(g=>{
+        const tag=hasAlt?(g.n<top.n?"少數":"多數"):"寫法";
+        const shown=(g.label.startsWith(" ")?"␣":"")+g.label;
+        lines.push("  ["+tag+"] ×"+g.n+"  "+shown);
+        if(hasAlt && g.n<top.n){
+          g.files.sort(sortId).forEach(fn=>lines.push("      "+fn));
+          g.files.forEach(fn=>minorityFiles.push({type:t,format:g.label,file:fn}));
+        }
+      });
+      if(dups.length){ lines.push("  同樹重複："); dups.forEach(d=>lines.push("      "+d)); }
+      combined.push(lines.join("\n"));
+    }
+    if(hasAlt && top){
+      const want = top.label; // e.g. "_whole view" or "_Whole view"
+      const proposed=[];
+      groups.forEach(g=>{
+        if(g.label === want) return;
+        g.files.forEach(fn=>{
+          const id=extractTreeId(fn, slash);
+          const ext=extOf(fn)||".jpg";
+          const neu=id+want+ext;
+          if(fn===neu) return;
+          if(stripExt(fn).toUpperCase()+"|"+(extOf(fn)||"").toUpperCase() === stripExt(neu).toUpperCase()+"|"+ext.toUpperCase()) return;
+          proposed.push({id, type:t, old:fn, neu, from:g.label, to:want});
+        });
+      });
+      if(proposed.length){
+        fmtAlts.push({
+          type:t,
+          majority:top,
+          minorities:groups.filter(g=>g.label!==want).map(g=>({label:g.label,n:g.n})),
+          majN:top.n,
+          proposed,
+          isNeed:NEED.includes(t)
+        });
+      }
+    }
+  }
+
+  const sameFile=Object.keys(fileCnt).filter(k=>fileCnt[k].n>1).sort(sortId)
+    .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
+
+  return {
+    items, byTree, unknown, junk, extCnt,
+    trees:Object.keys(byTree).sort(sortId),
+    sameFile, combined, minorityFiles, rename:[], fmtAlts, majorityTail
+  };
+}
+
+let last=null;
+
+function tab(btn){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("on"));
+  btn.classList.add("on");
+  document.getElementById("p-"+btn.dataset.p).classList.add("on");
+}
+
+function filesToBox(ev, id, photos){
+  const files=[...ev.target.files||[]];
+  ingestFiles(files, id, photos);
+}
+function ingestFiles(files, id, photos){
+  const ta=document.getElementById(id);
+  const names=[];
+  for(const f of files){
+    const n = f.webkitRelativePath || f.name;
+    if(photos){
+      const base=n.replace(/\\/g,"/").split("/").pop();
+      if(/\.(txt|csv)$/i.test(base)){
+        continue;
+      }
+      names.push(base);
+    }else{
+      names.push(n.replace(/\\/g,"/").split("/").pop());
+    }
+  }
+  const extra = names.filter(Boolean).join("\n");
+  ta.value = ta.value.trim() ? ta.value.trim()+"\n"+extra : extra;
+}
+
+["dropA","dropB"].forEach(did=>{
+  const el=document.getElementById(did);
+  const photos = did==="dropB";
+  const box = photos?"listB":"listA";
+  el.addEventListener("dragover", e=>{e.preventDefault(); el.classList.add("over");});
+  el.addEventListener("dragleave", ()=>el.classList.remove("over"));
+  el.addEventListener("drop", e=>{
+    e.preventDefault(); el.classList.remove("over");
+    ingestFiles([...e.dataTransfer.files], box, photos);
+  });
+});
+
+function run(){
+  const slash=document.getElementById("slashHSW").checked;
+  const onlyFromA=document.getElementById("onlyFromA").checked;
+  const filterJunk=document.getElementById("filterJunk").checked;
+  const showUnknown=document.getElementById("showUnknown").checked;
+  const showFmt=document.getElementById("showFmt").checked;
+  const A=parseTrees(document.getElementById("listA").value, slash);
+  const P=parsePhotos(document.getElementById("listB").value, slash, filterJunk);
+  const setA=new Set(A.uniq), setP=new Set(P.trees);
+  const checkList=onlyFromA?A.uniq:Array.from(new Set([...A.uniq,...P.trees])).sort(sortId);
+  const complete=[], incomplete=[];
+  const onlyA=A.uniq.filter(x=>!setP.has(x));
+  const onlyP=P.trees.filter(x=>!setA.has(x));
+  for(const id of checkList){
+    const rec=P.byTree[id];
+    const have=rec?Array.from(rec.types):[];
+    const miss=NEED.filter(t=>!have.includes(t));
+    if(!rec) incomplete.push({id,miss:NEED.slice(),have:[],extras:[],files:[]});
+    else if(!miss.length) complete.push({id,have,extras:rec.extras,files:rec.files,byNeed:rec.byNeed});
+    else incomplete.push({id,miss,have,extras:rec.extras||[],files:rec.files,byNeed:rec.byNeed});
+  }
+  last={A,P,complete,incomplete,onlyA,onlyP,checkList};
+
+  const heic=P.items.filter(x=>/\.hei[cf]$/i.test(x.line)).length;
+  const jpg=P.items.filter(x=>/\.jpe?g$/i.test(x.line)).length;
+  document.getElementById("kpis").innerHTML=`
+    <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
+    <div class="kpi"><b>${P.trees.length}</b><span>有相片的樹<br>（${P.items.length} 張）</span></div>
+    <div class="kpi"><b>${complete.length}</b><span>四張齊全</span></div>
+    <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
+    <div class="kpi"><b>${P.junk.length}</b><span>系統／垃圾檔</span></div>
+    <div class="kpi"><b>${jpg}</b><span>JPG</span></div>
+    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>
+    <div class="kpi"><b>${P.rename.length}</b><span>建議改名</span></div>`;
+
+  renderMatrix(checkList, P);
+  renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown});
+  renderRename(P);
+  renderFmt(P, showFmt);
+}
+
+function renderMatrix(checkList, P){
+  const extraTypes=new Set();
+  checkList.forEach(id=>{
+    const rec=P.byTree[id];
+    if(!rec) return;
+    Object.keys(rec.typeCnt).forEach(t=>{ if(!NEED.includes(t)) extraTypes.add(t); });
+  });
+  const extras=[...extraTypes].sort(sortId).slice(0,8);
+  const heads=["樹號",...NEED,...extras];
+  let html='<div class="card"><h3 class="info">矩陣預覽（✓ 有　— 欠　數字 = 該角度張數）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
+  heads.forEach(h=>html+=`<th>${h}</th>`);
+  html+="</tr></thead><tbody>";
+  checkList.forEach(id=>{
+    const rec=P.byTree[id];
+    html+=`<tr><td class="id">${id}</td>`;
+    NEED.forEach(t=>{
+      const n=rec&&rec.byNeed[t]?rec.byNeed[t].length:0;
+      if(n===1) html+=`<td class="cell-ok">✓</td>`;
+      else if(n>1) html+=`<td class="cell-more">${n}</td>`;
+      else html+=`<td class="cell-no">—</td>`;
+    });
+    extras.forEach(t=>{
+      const n=rec&&rec.typeCnt[t]?rec.typeCnt[t]:0;
+      html+= n?`<td class="cell-oth">${n}</td>`:`<td></td>`;
+    });
+    html+="</tr>";
+  });
+  html+="</tbody></table></div><div class='hint'>橙色數字 = 同一標準角度多於一張。藍色 = 非標準四張（例如 Wilted Crown）。</div></div>";
+  document.getElementById("p-matrix").innerHTML=html;
+}
+
+function box(title,cls,arr){
+  return `<div class="card"><h3 class="${cls}">${title}（${arr.length}）</h3><div class="col">${arr.length?arr.join("\n"):"—"}</div></div>`;
+}
+function renderLists(S){
+  const missLines=S.incomplete.map(x=>{
+    const bits=[`${x.id}  欠：${x.miss.join("、")}`];
+    if(x.have.length) bits.push("    已有："+x.have.join("、"));
+    return bits.join("\n");
+  });
+  const extraLines=[];
+  for(const id of S.P.trees){
+    const rec=S.P.byTree[id];
+    if(rec.extras.length) extraLines.push(id+"\n  "+rec.extras.join("\n  "));
+  }
+  let html='<div class="grid">';
+  html+=box("四張齊全","ok",S.complete.map(x=>x.id));
+  html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
+  html+=box("只在名單 1（完全沒相片）","miss",S.onlyA);
+  html+=box("只在相片名單","extra",S.onlyP);
+  html+="</div>";
+  if(S.showUnknown){
+    html+='<div class="grid" style="margin-top:12px">';
+    html+=box("其他角度","info",extraLines);
+    html+=box("無法抽出樹號","extra",S.P.unknown);
+    html+=box("已過濾／系統檔","extra",S.P.junk);
+    html+=box("檔名完全相同","extra",S.P.sameFile);
+    html+="</div>";
+  }
+  document.getElementById("p-lists").innerHTML=html;
+}
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function selectedFmtKeys(){
+  return Array.from(document.querySelectorAll(".fmt-apply:checked")).map(el=>el.dataset.key);
+}
+function rebuildRename(){
+  if(!last||!last.P) return;
+  const P=last.P;
+  const on=new Set(selectedFmtKeys());
+  const rename=[];
+  (P.fmtAlts||[]).forEach(alt=>{
+    const key=alt.type;
+    if(!on.has(key)) return;
+    alt.proposed.forEach(r=>rename.push({id:r.id,type:r.type,old:r.old,neu:r.neu}));
+  });
+  // dedupe by old name
+  const seen=new Set(), out=[];
+  rename.forEach(r=>{
+    const k=r.old+"→"+r.neu;
+    if(seen.has(k)) return;
+    seen.add(k); out.push(r);
+  });
+  P.rename=out;
+  const kpi=document.querySelector("#kpis .kpi:last-child b");
+  if(kpi) kpi.textContent=String(out.length);
+  renderRename(P);
+}
+function onFmtToggle(){ rebuildRename(); }
+function applyAllFmt(mode){
+  document.querySelectorAll(".fmt-apply").forEach(el=>{
+    if(mode==="need") el.checked = el.dataset.need==="1";
+    else if(mode==="all") el.checked = true;
+    else el.checked = false;
+  });
+  rebuildRename();
+}
+function renderRename(P){
+  if(!P.rename.length){
+    document.getElementById("p-rename").innerHTML='<div class="card"><h3 class="ok">建議改名（0）</h3><div class="col">未選擇格式改名，或多數格式已統一。</div></div>';
+    return;
+  }
+  let rows="舊檔名 → 建議新檔名\n";
+  P.rename.forEach(r=>{ rows+=r.old+"  →  "+r.neu+"\n"; });
+  document.getElementById("p-rename").innerHTML=`<div class="card"><h3 class="miss">建議改名（${P.rename.length}）</h3>
+    <p class="hint">只包含你在「數字後格式」勾選的少數→多數改名。下載 CSV 或 BAT 可批次改名。</p>
+    <div class="col">${esc(rows.trim())}</div></div>`;
+}
+function renderFmt(P, show){
+  if(!show){ document.getElementById("p-fmt").innerHTML=""; return; }
+  const alts=P.fmtAlts||[];
+  let html='<div class="card"><h3 class="extra">數字後格式（多數／少數）</h3>';
+  html+=`<p class="hint">例如 _whole view ×20、wholeview ×15：可勾選將少數寫法改成多數（wholeview → _whole view）。預設只勾標準四張。</p>
+    <div class="fmt-actions">
+      <button class="btn btn2" type="button" onclick="applyAllFmt('need')">標準四張</button>
+      <button class="btn btn2" type="button" onclick="applyAllFmt('all')">全部角度</button>
+      <button class="btn btn2" type="button" onclick="applyAllFmt('none')">全部取消</button>
+    </div>`;
+  if(!alts.length){
+    html+='<div class="col">'+(P.combined.length?P.combined.join("\n\n"):"沒有發現格式差異。")+'</div></div>';
+    document.getElementById("p-fmt").innerHTML=html;
+    rebuildRename();
+    return;
+  }
+  alts.forEach(alt=>{
+    const key=alt.type;
+    const checked=alt.isNeed?" checked":"";
+    const minBrief=alt.minorities.map(m=>m.label+" ×"+m.n).join("、");
+    const sample=alt.proposed.slice(0,3).map(r=>r.old+" → "+r.neu).join("\n");
+    const more=alt.proposed.length>3?("\n…另有 "+(alt.proposed.length-3)+" 個"):"";
+    html+=`<div class="fmt-choice">
+      <label><input class="fmt-apply" type="checkbox" data-key="${esc(key)}" data-need="${alt.isNeed?1:0}"${checked} onchange="onFmtToggle()"/>
+      <span><b>${esc(key)}</b>：將少數改成多數「${esc(alt.majority.label)}」（多數 ×${alt.majN}；少數 ${esc(minBrief)}）→ 建議改名 ${alt.proposed.length} 個</span></label>
+      <div class="sub">${esc(sample)}${esc(more)}</div>
+    </div>`;
+  });
+  if(P.combined.length){
+    html+=`<details style="margin-top:10px"><summary class="hint">原始格式報告</summary><div class="col" style="margin-top:8px">${esc(P.combined.join("\n\n"))}</div></details>`;
+  }
+  html+="</div>";
+  document.getElementById("p-fmt").innerHTML=html;
+  rebuildRename();
+}
+
+function shortText(){
+  if(!last) run();
+  const lines=["欠相清單："];
+  last.incomplete.forEach(x=>lines.push(x.id+" 欠 "+x.miss.join("、")));
+  if(last.onlyA.length) lines.push("完全沒相："+last.onlyA.join("、"));
+  if(lines.length===1) return "全部齊，無需補拍。";
+  return lines.join("\n");
+}
+function copyShort(){
+  const t=shortText();
+  navigator.clipboard.writeText(t).then(()=>alert("已複製欠相短訊"),()=>{ prompt("複製以下內容",t); });
+}
+function download(name, text){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob(["\uFEFF"+text],{type:"text/plain;charset=utf-8"}));
+  a.download=name; a.click();
+}
+function dlMissing(){
+  if(!last) run();
+  const rows=[["樹號","欠哪些","已有"]];
+  last.incomplete.forEach(x=>rows.push([x.id,x.miss.join("、"),x.have.join("、")]));
+  last.onlyA.forEach(x=>rows.push([x,"Tag、Whole view、Trunk base、Crown",""]));
+  download("欠相清單.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
+}
+function dlRename(){
+  if(!last) run();
+  const rows=[["舊檔名","新檔名","樹號","角度"]];
+  last.P.rename.forEach(r=>rows.push([r.old,r.neu,r.id,r.type]));
+  download("建議改名.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
+}
+function dlBat(){
+  if(!last) run();
+  let s="@echo off\r\nchcp 65001>nul\r\n";
+  last.P.rename.forEach(r=>{
+    s += `if exist "${r.old}" ren "${r.old}" "${r.neu}"\r\n`;
+  });
+  s += "echo Done\r\npause\r\n";
+  download("rename-photos.bat", s);
+}
+function dl(){
+  if(!last) run();
+  const rows=[["類別","樹號","欠哪些","已有／備註"]];
+  last.complete.forEach(x=>rows.push(["四張齊全",x.id,"",NEED.join("、")]));
+  last.incomplete.forEach(x=>rows.push(["欠相片",x.id,x.miss.join("、"),x.have.join("、")]));
+  last.onlyA.forEach(x=>rows.push(["只在名單1",x,NEED.join("、"),""]));
+  last.onlyP.forEach(x=>rows.push(["只在相片",x,"",Array.from(last.P.byTree[x].types).join("、")]));
+  last.P.rename.forEach(r=>rows.push(["建議改名",r.id,r.old,r.neu]));
+  last.P.junk.forEach(x=>rows.push(["過濾檔","","",x]));
+  download("photo-check.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
+}
+function swap(){
+  const a=document.getElementById("listA"), b=document.getElementById("listB");
+  const t=a.value; a.value=b.value; b.value=t;
+}
+function clearAll(){
+  document.getElementById("listA").value="";
+  document.getElementById("listB").value="";
+  document.getElementById("kpis").innerHTML="";
+  ["p-matrix","p-lists","p-rename","p-fmt"].forEach(id=>document.getElementById(id).innerHTML="");
+  last=null;
+}
+</script>
+</body>
+</html>
