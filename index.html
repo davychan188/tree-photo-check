@@ -36,8 +36,14 @@ h3{margin:8px 0;font-size:14px}
 .mtxwrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
 table.mtx{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
 table.mtx th,table.mtx td{border:1px solid var(--line);padding:6px 8px;text-align:center;white-space:nowrap}
-table.mtx th{background:#ecf3ec;position:sticky;top:0}
-table.mtx td.id{text-align:left;font-family:ui-monospace,Menlo,monospace;font-weight:700}
+table.mtx th{background:#ecf3ec;position:sticky;top:0;z-index:2}
+table.mtx th:first-child,table.mtx td.id{
+  position:sticky;left:0;z-index:1;
+  text-align:left;font-family:ui-monospace,Menlo,monospace;font-weight:700;
+  background:#fafdfa;box-shadow:2px 0 0 var(--line);
+}
+table.mtx th:first-child{background:#ecf3ec;z-index:3}
+table.mtx tr:nth-child(even) td.id{background:#f3f8f3}
 table.mtx tr:nth-child(even){background:#fafdfa}
 .cell-ok{background:#dcfce7;color:#166534;font-weight:700}
 .cell-no{background:#fee2e2;color:#991b1b;font-weight:700}
