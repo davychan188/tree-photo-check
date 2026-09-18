@@ -52,6 +52,12 @@ table.mtx tr:nth-child(even){background:#fafdfa}
 .fmt-choice label{font-weight:600;font-size:13px;display:flex;gap:8px;align-items:flex-start;cursor:pointer}
 .fmt-choice .sub{font-size:12px;color:#64748b;margin:6px 0 0 24px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap}
 .fmt-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.drop-big{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;padding:12px;margin-top:8px}
+.btn-folder{background:var(--g);color:#fff;font-weight:800;padding:10px 14px;border-radius:12px;cursor:pointer;font-size:14px;border:0;display:inline-flex;align-items:center;gap:6px}
+.btn-folder input{display:none}
+.btn-lite{background:#e2e8f0;color:#334155;font-weight:700;padding:8px 12px;border-radius:10px;cursor:pointer;font-size:13px;border:0}
+.btn-lite input{display:none}
+.path-note{font-size:12px;color:#64748b;margin-top:8px;line-height:1.45}
 </style>
 </head>
 <body>
@@ -77,9 +83,14 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <div class="card">
       <label>第二堆（2）相片檔名</label>
       <textarea id="listB" placeholder="T28_Tag.jpg&#10;T28_Whole view.jpg"></textarea>
-      <div class="drop" id="dropB">拖相片／資料夾到此（只讀檔名，不上載），或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" multiple webkitdirectory directory onchange="filesToBox(event,'listB',true)">選資料夾</label>
-      ／ <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listB',true)">選檔</label></div>
-      <div class="hint">支援 T28_Crown、AT-0349 Whole view、TY-A0001_Tag</div>
+      <div class="drop drop-big" id="dropB">
+        <button type="button" class="btn-folder" onclick="pickPhotoFolder()">選資料夾（只讀檔名）</button>
+        <label class="btn-lite">選檔／.txt<input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listB',true)"></label>
+        <button type="button" class="btn-lite" onclick="dlListNamesBat()">下載：用路徑匯出檔名.bat</button>
+        <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
+      </div>
+      <div class="path-note">相好多、好大都 OK：只讀檔名，唔會上載相片內容。瀏覽器基於安全<strong>唔可以</strong>直接貼 <code>C:\...</code> 路徑；請用「選資料夾」，或下載 BAT 寫入路徑 → 產生 txt → 貼返入呢度。</div>
+      <div class="hint">支援 T28_Crown、AT-0349 Whole view、TY-A0001_Tag；亦可拖資料夾到上面虛線框</div>
     </div>
   </div>
   <div class="btns">
@@ -305,6 +316,62 @@ function tab(btn){
   document.getElementById("p-"+btn.dataset.p).classList.add("on");
 }
 
+async function pickPhotoFolder(){
+  // Prefer Chrome File System Access: enumerate names only, no file bytes.
+  if(window.showDirectoryPicker){
+    try{
+      const dir = await window.showDirectoryPicker();
+      const names=[];
+      async function walk(handle, depth){
+        for await (const entry of handle.values()){
+          if(entry.kind==="file") names.push(entry.name);
+          else if(entry.kind==="directory" && depth<2) await walk(entry, depth+1);
+        }
+      }
+      await walk(dir, 0);
+      if(!names.length){ alert("資料夾內找不到檔案"); return; }
+      const ta=document.getElementById("listB");
+      const extra=names.filter(Boolean).join("\n");
+      ta.value = ta.value.trim() ? ta.value.trim()+"\n"+extra : extra;
+      alert("已讀取 "+names.length+" 個檔名（未上載相片）");
+      return;
+    }catch(e){
+      if(e && e.name==="AbortError") return;
+      // fall through to input picker
+    }
+  }
+  document.getElementById("folderPick").click();
+}
+function dlListNamesBat(){
+  const s = `@echo off\r
+chcp 65001>nul\r
+REM ========== 改下一行做你嘅相片資料夾完整路徑 ==========\r
+set "FOLDER=C:\\Users\\你的帳號\\Desktop\\photos"\r
+REM ======================================================\r
+if not exist "%FOLDER%\\" (\r
+  echo 找不到資料夾：%FOLDER%\r
+  echo 請用記事本改本 BAT 入面嘅 FOLDER= 路徑\r
+  pause\r
+  exit /b 1\r
+)\r
+set "OUT=%~dp0photo-filenames.txt"\r
+(\r
+  dir /b "%FOLDER%\\*.jpg" 2>nul\r
+  dir /b "%FOLDER%\\*.jpeg" 2>nul\r
+  dir /b "%FOLDER%\\*.png" 2>nul\r
+  dir /b "%FOLDER%\\*.heic" 2>nul\r
+  dir /b "%FOLDER%\\*.heif" 2>nul\r
+  dir /b "%FOLDER%\\*.webp" 2>nul\r
+  dir /b "%FOLDER%\\*.tif" 2>nul\r
+  dir /b "%FOLDER%\\*.tiff" 2>nul\r
+  dir /b "%FOLDER%\\*.bmp" 2>nul\r
+) > "%OUT%"\r
+echo 已寫入：%OUT%\r
+echo 用記事本打開，Ctrl+A 全選複製，貼去「四張相片完整性對比」右邊欄。\r
+pause\r
+`;
+  download("用路徑匯出檔名.bat", s.replace(/^\uFEFF?/, ""));
+}
 function filesToBox(ev, id, photos){
   const files=[...ev.target.files||[]];
   ingestFiles(files, id, photos);
