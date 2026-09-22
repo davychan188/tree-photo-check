@@ -25,13 +25,16 @@
 
 ## Excel 缺陷文字 ↔ 相片路徑
 
-1. 選「Excel 缺陷文字 ↔ 相片路徑對比」
-2. 名單 1：樹號（次序要同 Excel）
-3. 名單 2：相片路徑，例如 `TG-T0201_Wilted.jpg`（唔使 Tag／Crown／Trunk base／Whole view）
-4. 名單 3：由 Excel 貼缺陷文字（一行一項，對應名單 1 次序）
-5. 撳檢查 → 睇「缺陷對比」，可下載／複製 CSV
+1. 選「Excel 缺陷文字 ↔ 相片路徑對比」（預設）
+2. 名單 2：相片路徑，例如 `TG-T0175_Co-dominant branches.jpg`
+3. 名單 3：Excel 貼 **樹號 + 缺陷**（Tab／逗號／空格），例如：
+   - `TG-T0175	Co-dominant branches`
+   - `T-2225	Leaning`
+4. 名單 1 可選（用來過濾範圍）
+5. 撳檢查 → 睇對上／唔啱／有 Excel 無相；可下載或複製缺陷對比 CSV
 
-預設會略過檔名入面嘅 Tag／Whole view／Trunk base／Crown。
+唔再提供改名 CSV／BAT。預設略過 Tag／Whole view／Trunk base／Crown。
+
 
 ## 用法
 

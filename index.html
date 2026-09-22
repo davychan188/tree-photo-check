@@ -75,8 +75,8 @@ table.mtx tr:nth-child(even){background:#fafdfa}
 </header>
 <div class="wrap">
   <div class="opts">
-    <label><input type="radio" name="mode" id="modeFour" checked/> 齊套四張（Tag／Whole view／Trunk base／Crown）</label>
-    <label><input type="radio" name="mode" id="modeDefect"/> Excel 缺陷文字 ↔ 相片路徑對比</label>
+    <label><input type="radio" name="mode" id="modeFour"/> 齊套四張（Tag／Whole view／Trunk base／Crown）</label>
+    <label><input type="radio" name="mode" id="modeDefect" checked/> Excel 缺陷文字 ↔ 相片路徑對比</label>
     <label><input type="checkbox" id="slashHSW"/> 把 H/SW 當成 HSW</label>
     <label><input type="checkbox" id="onlyFromA" checked/> 只檢查／對比名單 1 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
@@ -100,22 +100,20 @@ table.mtx tr:nth-child(even){background:#fafdfa}
         <button type="button" class="btn-lite" onclick="dlListNamesBat()">下載：用路徑匯出檔名.bat</button>
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
-      <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。缺陷模式：相片用 TG-T0201_Wilted 呢類，同右欄 Excel 文字對比（略過 Tag／Crown 等標準四張）。齊套模式先查四張。</div>
+      <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。缺陷模式：Excel 貼「樹號 + 缺陷」，相片用 TG-T0175_Co-dominant branches 呢類對比（略過 Tag／Crown 等）。</div>
       <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾</div>
     </div>
     <div class="card">
-      <label>第三堆（3）Excel 缺陷文字</label>
-      <textarea id="listC" placeholder="Wilted&#10;Leaning&#10;Decay on trunk&#10;Co-dominant trunks with included bark"></textarea>
+      <label>第三堆（3）Excel（樹號 + 缺陷）</label>
+      <textarea id="listC" placeholder="TG-T0175&#9;Co-dominant branches&#10;TG-T0176&#9;Wilted crown&#10;T-2225&#9;Leaning"></textarea>
       <div class="drop" id="dropC">拖 Excel 匯出嘅 .txt／.csv 到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" accept=".txt,.csv,text/plain" onchange="filesToBox(event,'listC',false)">選檔</label></div>
-      <div class="hint">一行一項，順序對應名單 1 嘅樹（第 1 行 ↔ 第 1 棵）。缺陷模式會同相片 <code>_</code> 後文字對比；唔使 Tag／Crown 等四張。</div>
+      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。</div>
     </div>
   </div>
   <div class="btns">
     <button class="btn" onclick="run()">檢查</button>
     <button class="btn btn2" onclick="copyShort()">複製欠相短訊</button>
     <button class="btn btn2" onclick="dlMissing()">欠相清單</button>
-    <button class="btn btn2" onclick="dlRename()">改名 CSV</button>
-    <button class="btn btn2" onclick="dlBat()">改名 BAT</button>
     <button class="btn btn2" onclick="dl()">完整 CSV</button>
     <button class="btn btn2" onclick="dlExcelPhotos()">匯出 Excel（檔名／_後）</button>
     <button class="btn btn2" onclick="copyExcelPhotos()">複製給 Excel</button>
@@ -129,7 +127,6 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣／對比</button>
     <button class="tab" data-p="lists" onclick="tab(this)">清單</button>
     <button class="tab" data-p="defect" onclick="tab(this)">缺陷對比</button>
-    <button class="tab" data-p="rename" onclick="tab(this)">建議改名</button>
     <button class="tab" data-p="fmt" onclick="tab(this)">數字後格式</button>
   </div>
   <div id="p-matrix" class="panel on"></div>
@@ -462,17 +459,49 @@ function uniqueInOrder(arr){
 
 function isDefectMode(){ return !!(document.getElementById("modeDefect")||{}).checked; }
 
-function parseExcelLines(text){
+function parseExcelLines(text, slash){
   const rows=[];
   for(const raw of String(text||"").split(/\r?\n/)){
     let s=raw.trim();
     if(!s) continue;
     if((s.startsWith('"')&&s.endsWith('"'))||(s.startsWith("'")&&s.endsWith("'"))) s=s.slice(1,-1).trim();
-    if(s.includes(",") && !/[\\/]/.test(s)){
-      const m=s.match(/^"([^"]*)"|([^,]+)/);
-      if(m) s=(m[1]!=null?m[1]:m[2]).trim();
+    // CSV / TSV: treeId + defect
+    let id="", defect="";
+    if(s.includes("\t")){
+      const parts=s.split("\t").map(x=>x.trim()).filter(Boolean);
+      if(parts.length>=2){ id=extractTreeId(parts[0], slash); defect=parts.slice(1).join(" ").trim(); }
+      else { defect=parts[0]||""; }
+    }else if(s.includes(",") && !/[\\/]/.test(s)){
+      // naive CSV split respecting simple quotes
+      const parts=[]; let cur="", q=false;
+      for(let i=0;i<s.length;i++){
+        const ch=s[i];
+        if(ch==='"'){ q=!q; continue; }
+        if(ch===',' && !q){ parts.push(cur.trim()); cur=""; continue; }
+        cur+=ch;
+      }
+      parts.push(cur.trim());
+      const clean=parts.filter(Boolean);
+      if(clean.length>=2){ id=extractTreeId(clean[0], slash); defect=clean.slice(1).join(" ").trim(); }
+      else { defect=clean[0]||""; }
+    }else{
+      // "TG-T0175 Co-dominant branches" or bare defect
+      const m=s.match(/^([A-Za-z0-9][A-Za-z0-9\/\-]*[A-Za-z0-9]|[A-Za-z0-9]+)\s+(.+)$/);
+      if(m){
+        const maybeId=extractTreeId(m[1], slash);
+        if(maybeId && maybeId.length>=2 && /[A-Za-z]/.test(maybeId) && /\d/.test(maybeId)){
+          id=maybeId; defect=m[2].trim();
+        }else{
+          defect=s;
+        }
+      }else{
+        // only id? or only defect
+        const maybe=extractTreeId(s, slash);
+        if(maybe && maybe.toUpperCase()===stripExt(normId(s, slash))) { id=maybe; defect=""; }
+        else defect=s;
+      }
     }
-    if(s) rows.push(s);
+    if(id || defect) rows.push({id:id||"", defect:defect||"", raw:s});
   }
   return rows;
 }
@@ -500,14 +529,54 @@ function photoSuffix(line, id){
 }
 
 function buildDefectCompare(A, P, excel, checkList, skipStd){
-  const trees = (A.rows && A.rows.length) ? uniqueInOrder(A.rows) : (A.uniq.length ? A.uniq.slice() : checkList.slice());
+  // excel rows: {id, defect, raw} — prefer id-tagged Excel lines
+  const hasIds = excel.some(r=>r && r.id);
   const matched=[], mismatch=[], noPhoto=[], noExcel=[], extras=[];
   let stdSkipped=0;
   const usedPhoto=new Set();
-  const n=Math.max(trees.length, excel.length);
-  for(let i=0;i<n;i++){
-    const id=trees[i]||"";
-    const excelText=excel[i]||"";
+  const usedExcel=new Set();
+
+  const treesFromA = (A.rows && A.rows.length) ? uniqueInOrder(A.rows) : (A.uniq.length ? A.uniq.slice() : []);
+  const onlyFromA = !!(document.getElementById("onlyFromA")||{}).checked;
+
+  // Build work list: if Excel has IDs, use those; else pair by order with list A
+  const jobs=[];
+  if(hasIds){
+    excel.forEach((r,i)=>{
+      if(!r) return;
+      const id=r.id || "";
+      if(onlyFromA && id && treesFromA.length && !treesFromA.includes(id) && !new Set(treesFromA).has(id)){
+        // still include if not filtering strictly — onlyFromA means skip excel trees not in A
+        const setA=new Set(treesFromA);
+        if(id && !setA.has(id)) return;
+      }
+      jobs.push({id, excel:r.defect||"", excelIdx:i});
+    });
+    // also trees in A with photos but no excel row
+    const excelIds=new Set(excel.map(r=>r.id).filter(Boolean));
+    treesFromA.forEach(id=>{
+      if(!excelIds.has(id)) jobs.push({id, excel:"", excelIdx:-1, missingExcel:true});
+    });
+  }else{
+    const trees = treesFromA.length ? treesFromA : checkList.slice();
+    const n=Math.max(trees.length, excel.length);
+    for(let i=0;i<n;i++){
+      jobs.push({id:trees[i]||"", excel:(excel[i]&&excel[i].defect)||(typeof excel[i]==="string"?excel[i]:""), excelIdx:i});
+    }
+  }
+
+  // Deduplicate jobs by id+excel keeping first
+  const seenJob=new Set();
+  const uniqJobs=[];
+  jobs.forEach(j=>{
+    const k=(j.id||"")+"\0"+(j.excel||"")+"\0"+j.excelIdx;
+    if(seenJob.has(k)) return;
+    seenJob.add(k); uniqJobs.push(j);
+  });
+
+  uniqJobs.forEach(j=>{
+    const id=j.id||"";
+    const excelText=j.excel||"";
     const rec=(id && P.byTree[id]) ? P.byTree[id] : null;
     const photos=(rec?rec.files:[]).map(fn=>{
       const suf=photoSuffix(fn, id);
@@ -518,21 +587,23 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
       return !!p.suf;
     });
     defectPhotos.forEach(p=>usedPhoto.add(String(p.fn).toUpperCase()));
+    if(j.excelIdx>=0) usedExcel.add(j.excelIdx);
 
-    if(!id && excelText){ noPhoto.push({id:"(無樹號)", excel:excelText, photos:[]}); continue; }
+    if(!id && excelText){ noPhoto.push({id:"(無樹號)", excel:excelText, photos:[]}); return; }
     if(id && !excelText){
       if(defectPhotos.length) noExcel.push({id, excel:"", photos:defectPhotos, suffixes:defectPhotos.map(p=>p.suf)});
       else if(!photos.length) noPhoto.push({id, excel:"", photos:[]});
-      continue;
+      return;
     }
     if(!defectPhotos.length){
       noPhoto.push({id, excel:excelText, photos:photos.filter(p=>p.std)});
-      continue;
+      return;
     }
     const hit=defectPhotos.filter(p=>defectMatch(p.suf, excelText));
     if(hit.length) matched.push({id, excel:excelText, photos:hit, suffixes:hit.map(p=>p.suf), other:defectPhotos.filter(p=>!hit.includes(p))});
     else mismatch.push({id, excel:excelText, photos:defectPhotos, suffixes:defectPhotos.map(p=>p.suf)});
-  }
+  });
+
   for(const it of (P.items||[])){
     if(usedPhoto.has(String(it.line).toUpperCase())) continue;
     const suf=photoSuffix(it.line, it.id);
@@ -540,8 +611,12 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
     if(skipStd && isStdAngleSuffix(suf)){ stdSkipped++; continue; }
     extras.push({id:it.id, fn:it.line, suf, src:it.src||it.line});
   }
-  return {matched, mismatch, noPhoto, noExcel, extras, stdSkipped, treeCount:trees.length, excelCount:excel.length};
+
+  const excelCount = excel.filter(r=>r && (r.id || r.defect)).length;
+  const treeCount = hasIds ? new Set(excel.map(r=>r.id).filter(Boolean)).size : treesFromA.length;
+  return {matched, mismatch, noPhoto, noExcel, extras, stdSkipped, treeCount, excelCount, pairedById:hasIds};
 }
+
 
 function renderDefect(D){
   const el=document.getElementById("p-defect");
@@ -555,8 +630,8 @@ function renderDefect(D){
     return `${o.id}  |  Excel: ${o.excel||"—"}  |  相片_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">缺陷對比</h3>
-    <p class="hint">名單 1 第 N 棵 ↔ Excel 第 N 行。相片 <code>樹號_缺陷.jpg</code> 嘅「_後」同該行文字比對（忽略大小寫／括號）。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
-    <p class="hint">樹數 ${D.treeCount}　／　Excel ${D.excelCount}　${D.treeCount!==D.excelCount?'<b class="miss">行數唔同，請核對次序</b>':''}</p>
+    <p class="hint">Excel 每行「樹號 + 缺陷」會用樹號對相片；再比相片 <code>_</code> 後文字（忽略大小寫／括號）。若 Excel 無樹號，先退回同名單 1 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
+    <p class="hint">Excel 樹號 ${D.treeCount}　／　Excel 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上","ok", D.matched.map(line));
   html+=box("唔啱（Excel ≠ 相片_後）","miss", D.mismatch.map(line));
@@ -605,7 +680,7 @@ function run(){
   const skipStd=document.getElementById("skipStdAngles").checked;
   const A=parseTrees(document.getElementById("listA").value, slash);
   const P=parsePhotos(document.getElementById("listB").value, slash, filterJunk);
-  const excel=parseExcelLines(document.getElementById("listC").value);
+  const excel=parseExcelLines(document.getElementById("listC").value, slash);
   const setA=new Set(A.uniq), setP=new Set(P.trees);
   const checkList=onlyFromA?uniqueInOrder(A.rows&&A.rows.length?A.rows:A.uniq):Array.from(new Set([...uniqueInOrder(A.rows&&A.rows.length?A.rows:A.uniq),...P.trees])).sort(sortId);
   const onlyA=A.uniq.filter(x=>!setP.has(x));
@@ -616,7 +691,7 @@ function run(){
     last={mode:"defect", A,P,excel,checkList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
     document.getElementById("kpis").innerHTML=`
       <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
-      <div class="kpi"><b>${excel.length}</b><span>Excel 缺陷行</span></div>
+      <div class="kpi"><b>${excel.length}</b><span>Excel 行（含樹號）</span></div>
       <div class="kpi"><b>${P.items.length}</b><span>相片檔</span></div>
       <div class="kpi"><b>${defect.matched.length}</b><span>對上</span></div>
       <div class="kpi"><b>${defect.mismatch.length}</b><span>唔啱</span></div>
