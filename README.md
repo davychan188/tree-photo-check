@@ -22,6 +22,17 @@
 - 撳「選資料夾（只讀檔名）」：只取檔名，唔會上載相，相幾大都 OK。
 - Windows 可下載「用路徑匯出檔名.bat」：改 `FOLDER=` 路徑 → 雙擊 → 得 `photo-filenames.txt` → 貼去右邊欄。
 
+
+## Excel 缺陷文字 ↔ 相片路徑
+
+1. 選「Excel 缺陷文字 ↔ 相片路徑對比」
+2. 名單 1：樹號（次序要同 Excel）
+3. 名單 2：相片路徑，例如 `TG-T0201_Wilted.jpg`（唔使 Tag／Crown／Trunk base／Whole view）
+4. 名單 3：由 Excel 貼缺陷文字（一行一項，對應名單 1 次序）
+5. 撳檢查 → 睇「缺陷對比」，可下載／複製 CSV
+
+預設會略過檔名入面嘅 Tag／Whole view／Trunk base／Crown。
+
 ## 用法
 
 1. 左欄貼樹編號（一行一個），或拖 .txt。
