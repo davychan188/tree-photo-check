@@ -88,15 +88,15 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     </div>
     <div class="card">
       <label>第二堆（2）相片檔名</label>
-      <textarea id="listB" placeholder="T28_Tag.jpg&#10;T28_Whole view.jpg"></textarea>
+      <textarea id="listB" placeholder="T28_Tag.jpg&#10;&quot;R:\Photos\TG-T0201_Tag.jpg&quot;"></textarea>
       <div class="drop drop-big" id="dropB">
         <button type="button" class="btn-folder" onclick="pickPhotoFolder()">選資料夾（只讀檔名）</button>
         <label class="btn-lite">選檔／.txt<input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listB',true)"></label>
         <button type="button" class="btn-lite" onclick="dlListNamesBat()">下載：用路徑匯出檔名.bat</button>
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
-      <div class="path-note">相好多、好大都 OK：只讀檔名，唔會上載相片內容。瀏覽器基於安全<strong>唔可以</strong>直接貼 <code>C:\...</code> 路徑；請用「選資料夾」，或下載 BAT 寫入路徑 → 產生 txt → 貼返入呢度。</div>
-      <div class="hint">支援 T28_Crown、AT-0349 Whole view、TY-A0001_Tag；亦可拖資料夾到上面虛線框</div>
+      <div class="path-note">相好多、好大都 OK：只讀檔名，唔會上載內容。可直接貼 Explorer「複製為路徑」嘅完整路徑（唔同 folder、連引號都得），會自動只取檔名做檢查；改名 BAT 會用返完整路徑。亦可「選資料夾」，或下載 BAT 由資料夾匯出檔名。</div>
+      <div class="hint">支援檔名或完整路徑（含引號）；TG-T0201_Tag、T28_Crown 都得；亦可拖資料夾到上面虛線框</div>
     </div>
   </div>
   <div class="btns">
@@ -130,6 +130,18 @@ function extOf(line){ const m=String(line).trim().match(/(\.[A-Za-z0-9]{1,5})$/)
 function stripExt(s){
   s = String(s).replace(/\\/g,"/").split("/").pop();
   return s.replace(/(\.[A-Za-z0-9]{1,5})+$/i, "");
+}
+function normalizeInputLine(raw){
+  let s = String(raw).trim();
+  if(!s) return null;
+  if((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) s = s.slice(1,-1).trim();
+  if(!s) return null;
+  const src = s;
+  const asSlash = s.replace(/\\/g, "/");
+  const parts = asSlash.split("/").filter(Boolean);
+  const name = parts.length ? parts[parts.length-1] : s;
+  const hasDir = /[\\/]/.test(s);
+  return {src, name, hasDir};
 }
 function normId(s, slash){
   s = s.trim().toUpperCase();
@@ -213,12 +225,13 @@ function parsePhotos(text, slash, filterJunk){
   const items=[], unknown=[], junk=[], byTree={};
   const fileCnt={}, extCnt={};
   for(const raw of text.split(/\r?\n/)){
-    let line = raw.trim();
-    if(!line) continue;
-    line = line.replace(/\\/g,"/").split("/").pop();
+    const parsed = normalizeInputLine(raw);
+    if(!parsed) continue;
+    const line = parsed.name;
+    const src = parsed.src;
     const why = isJunk(line);
     if(why){
-      junk.push(why + " ← " + line);
+      junk.push(why + " ← " + (parsed.hasDir ? src : line));
       if(filterJunk) continue;
     }
     const ext = extOf(line) || "(無)";
@@ -227,7 +240,7 @@ function parsePhotos(text, slash, filterJunk){
     fileCnt[key]=fileCnt[key]||{n:0,sample:line};
     fileCnt[key].n++;
     const {id, type} = classifyType(line, slash);
-    if(!id){ unknown.push(line); continue; }
+    if(!id){ unknown.push(parsed.hasDir ? src : line); continue; }
     if(!byTree[id]) byTree[id]={types:new Set(), typeCnt:{}, files:[], extras:[], byNeed:{}};
     byTree[id].files.push(line);
     byTree[id].typeCnt[type]=(byTree[id].typeCnt[type]||0)+1;
@@ -238,16 +251,17 @@ function parsePhotos(text, slash, filterJunk){
     }else{
       byTree[id].extras.push(type + " ← " + line);
     }
-    items.push({id, type, line, ext, fmt: formatOf(line, id)});
+    items.push({id, type, line, src, hasDir: parsed.hasDir, ext, fmt: formatOf(line, id)});
   }
 
   const fmtByType={};
   for(const it of items){
     const tk=it.type, k=it.fmt.key;
     if(!fmtByType[tk]) fmtByType[tk]={};
-    if(!fmtByType[tk][k]) fmtByType[tk][k]={label:it.fmt.label, join:it.fmt.join, typeFmt:it.fmt.typeFmt, n:0, files:[], trees:{}};
+    if(!fmtByType[tk][k]) fmtByType[tk][k]={label:it.fmt.label, join:it.fmt.join, typeFmt:it.fmt.typeFmt, n:0, files:[], srcs:{}, trees:{}};
     const g=fmtByType[tk][k];
     g.n++; g.files.push(it.line);
+    g.srcs[it.line]=it.src||it.line;
     g.trees[it.id]=(g.trees[it.id]||0)+1;
   }
 
@@ -287,7 +301,8 @@ function parsePhotos(text, slash, filterJunk){
           const neu=id+want+ext;
           if(fn===neu) return;
           if(stripExt(fn).toUpperCase()+"|"+(extOf(fn)||"").toUpperCase() === stripExt(neu).toUpperCase()+"|"+ext.toUpperCase()) return;
-          proposed.push({id, type:t, old:fn, neu, from:g.label, to:want});
+          const src = (g.srcs && g.srcs[fn]) || fn;
+          proposed.push({id, type:t, old:fn, neu, src, from:g.label, to:want});
         });
       });
       if(proposed.length){
@@ -529,7 +544,7 @@ function rebuildRename(){
   (P.fmtAlts||[]).forEach(alt=>{
     const key=alt.type;
     if(!on.has(key)) return;
-    alt.proposed.forEach(r=>rename.push({id:r.id,type:r.type,old:r.old,neu:r.neu}));
+    alt.proposed.forEach(r=>rename.push({id:r.id,type:r.type,old:r.old,neu:r.neu,src:r.src||r.old}));
   });
   // dedupe by old name
   const seen=new Set(), out=[];
@@ -558,7 +573,10 @@ function renderRename(P){
     return;
   }
   let rows="舊檔名 → 建議新檔名\n";
-  P.rename.forEach(r=>{ rows+=r.old+"  →  "+r.neu+"\n"; });
+  P.rename.forEach(r=>{
+    const from = (r.src && r.src!==r.old) ? r.src : r.old;
+    rows+=from+"  →  "+r.neu+"\n";
+  });
   document.getElementById("p-rename").innerHTML=`<div class="card"><h3 class="miss">建議改名（${P.rename.length}）</h3>
     <p class="hint">只包含你在「數字後格式」勾選的少數→多數改名。下載 CSV 或 BAT 可批次改名。</p>
     <div class="col">${esc(rows.trim())}</div></div>`;
@@ -626,14 +644,16 @@ function dlMissing(){
 function dlRename(){
   if(!last) run();
   const rows=[["舊檔名","新檔名","樹號","角度"]];
-  last.P.rename.forEach(r=>rows.push([r.old,r.neu,r.id,r.type]));
+  last.P.rename.forEach(r=>rows.push([r.src||r.old,r.neu,r.id,r.type]));
   download("建議改名.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
 }
 function dlBat(){
   if(!last) run();
   let s="@echo off\r\nchcp 65001>nul\r\n";
   last.P.rename.forEach(r=>{
-    s += `if exist "${r.old}" ren "${r.old}" "${r.neu}"\r\n`;
+    const from = r.src || r.old;
+    const neuBase = String(r.neu).replace(/\\/g,"/").split("/").pop();
+    s += `if exist "${from}" ren "${from}" "${neuBase}"\r\n`;
   });
   s += "echo Done\r\npause\r\n";
   download("rename-photos.bat", s);
