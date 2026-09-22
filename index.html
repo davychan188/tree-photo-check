@@ -95,7 +95,7 @@ table.mtx tr:nth-child(even){background:#fafdfa}
         <button type="button" class="btn-lite" onclick="dlListNamesBat()">下載：用路徑匯出檔名.bat</button>
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
-      <div class="path-note">相好多、好大都 OK：只讀檔名，唔會上載內容。可直接貼 Explorer「複製為路徑」嘅完整路徑（唔同 folder、連引號都得），會自動只取檔名做檢查；改名 BAT 會用返完整路徑。亦可「選資料夾」，或下載 BAT 由資料夾匯出檔名。</div>
+      <div class="path-note">相好多、好大都 OK：只讀檔名，唔會上載內容。可直接貼 Explorer「複製為路徑」（唔同 folder、連引號都得），自動只取檔名做齊套檢查。已係 TG-T0201_Tag 呢類寫法就唔使改名；可用「匯出 Excel（檔名／_後）」或「複製給 Excel」抽出樹號同 _ 後面資料去對表。亦可「選資料夾」。</div>
       <div class="hint">支援檔名或完整路徑（含引號）；TG-T0201_Tag、T28_Crown 都得；亦可拖資料夾到上面虛線框</div>
     </div>
   </div>
@@ -106,6 +106,8 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <button class="btn btn2" onclick="dlRename()">改名 CSV</button>
     <button class="btn btn2" onclick="dlBat()">改名 BAT</button>
     <button class="btn btn2" onclick="dl()">完整 CSV</button>
+    <button class="btn btn2" onclick="dlExcelPhotos()">匯出 Excel（檔名／_後）</button>
+    <button class="btn btn2" onclick="copyExcelPhotos()">複製給 Excel</button>
     <button class="btn btn2" onclick="swap()">對調 1/2</button>
     <button class="btn btn2" onclick="clearAll()">清空</button>
   </div>
@@ -578,7 +580,7 @@ function renderRename(P){
     rows+=from+"  →  "+r.neu+"\n";
   });
   document.getElementById("p-rename").innerHTML=`<div class="card"><h3 class="miss">建議改名（${P.rename.length}）</h3>
-    <p class="hint">只包含你在「數字後格式」勾選的少數→多數改名。下載 CSV 或 BAT 可批次改名。</p>
+    <p class="hint">已統一寫法（例如全部 _Tag）就唔使改名。只有發現少數／多數格式差異、又勾選要統一時，先會有建議；下載 CSV／BAT 可批次改名。</p>
     <div class="col">${esc(rows.trim())}</div></div>`;
 }
 function renderFmt(P, show){
@@ -669,6 +671,33 @@ function dl(){
   last.P.junk.forEach(x=>rows.push(["過濾檔","","",x]));
   download("photo-check.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
 }
+
+function photoExcelRows(){
+  if(!last) run();
+  const rows=[["完整路徑","檔名","樹號","_後資料","判定角度","副檔名"]];
+  (last.P.items||[]).forEach(it=>{
+    const raw = stripExt(it.line);
+    let after = restAfterId(raw, it.id);
+    // keep the literal text after first separator for Excel
+    let suffix = after.replace(/^[\s_\-]+/, "").trim();
+    if(!suffix && after) suffix = after.trim();
+    rows.push([it.src||it.line, it.line, it.id||"", suffix, it.type||"", it.ext||""]);
+  });
+  return rows;
+}
+function dlExcelPhotos(){
+  const rows=photoExcelRows();
+  download("相片檔名對照.csv", rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"));
+}
+function copyExcelPhotos(){
+  const rows=photoExcelRows();
+  const tsv=rows.map(r=>r.map(c=>String(c).replace(/\t/g," ").replace(/\r?\n/g," ")).join("\t")).join("\n");
+  navigator.clipboard.writeText(tsv).then(
+    ()=>alert("已複製 "+(rows.length-1)+" 行到剪貼簿，可直接 Ctrl+V 貼去 Excel"),
+    ()=>{ prompt("複製以下內容貼去 Excel", tsv); }
+  );
+}
+
 function swap(){
   const a=document.getElementById("listA"), b=document.getElementById("listB");
   const t=a.value; a.value=b.value; b.value=t;
