@@ -115,6 +115,7 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <button class="btn btn2" onclick="clearAll()">清空</button>
   </div>
   <div class="kpis" id="kpis"></div>
+  <div id="warnNoUnderscore" style="display:none;margin:12px 0"></div>
   <div class="tabs">
     <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣</button>
     <button class="tab" data-p="defect" onclick="tab(this)">2↔3 結果</button>
@@ -260,7 +261,18 @@ function parsePhotos(text, slash, filterJunk){
     }else{
       byTree[id].extras.push(type + " ← " + line);
     }
-    items.push({id, type, line, src, hasDir: parsed.hasDir, ext, fmt: formatOf(line, id)});
+    const fmt = formatOf(line, id);
+    items.push({id, type, line, src, hasDir: parsed.hasDir, ext, fmt});
+
+  }
+
+  const noUnderscore=[];
+  for(const it of items){
+    // Expect treeId_suffix — flag space, hyphen, or glued (no separator)
+    if(!it.fmt || it.fmt.join !== "_"){
+      const why = !it.fmt.join ? "樹號後無 _（黏住或缺分隔）" : (it.fmt.join===" " ? "樹號後係空格，唔係 _" : (it.fmt.join==="-" ? "樹號後係 -，唔係 _" : "樹號後唔係 _"));
+      noUnderscore.push(why + " ← " + it.line);
+    }
   }
 
   const fmtByType={};
@@ -331,7 +343,7 @@ function parsePhotos(text, slash, filterJunk){
     .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
 
   return {
-    items, byTree, unknown, junk, extCnt,
+    items, byTree, unknown, junk, extCnt, noUnderscore,
     trees:Object.keys(byTree).sort(sortId),
     sameFile, combined, minorityFiles, rename:[], fmtAlts, majorityTail
   };
@@ -669,6 +681,25 @@ function copyDefect(){
   );
 }
 
+
+function warnNoUnderscore(P){
+  const list = (P && P.noUnderscore) || [];
+  const el = document.getElementById("warnNoUnderscore");
+  if(!el) return list.length;
+  if(!list.length){
+    el.style.display="none";
+    el.innerHTML="";
+    return 0;
+  }
+  el.style.display="block";
+  el.innerHTML = `<div class="card" style="border:2px solid #b91c1c;background:#fef2f2">
+    <h3 class="extra">⚠ 樹號後冇用 _ 分隔（${list.length}）</h3>
+    <p class="hint">標準應係 <code>TG-T0175_Leaning.jpg</code>。以下檔名樹號後面唔係 <code>_</code>（可能係空格、連字號、或者黏住）：</p>
+    <div class="col">${list.map(esc).join("\n")}</div>
+  </div>`;
+  return list.length;
+}
+
 function run(){
   const slash=document.getElementById("slashHSW").checked;
   const onlyFromA=document.getElementById("onlyFromA").checked;
@@ -699,6 +730,7 @@ function run(){
     }
     P.trees.forEach(id=>{ if(!mtxList.includes(id)) mtxList.push(id); });
     last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
+    const noUs=(P.noUnderscore||[]).length;
     document.getElementById("kpis").innerHTML=`
       <div class="kpi"><b>${excel.length}</b><span>Excel 行</span></div>
       <div class="kpi"><b>${P.items.length}</b><span>相片檔</span></div>
@@ -706,7 +738,9 @@ function run(){
       <div class="kpi"><b>${defect.mismatch.length}</b><span>唔啱</span></div>
       <div class="kpi"><b>${defect.noPhoto.length}</b><span>有 Excel 無缺陷相</span></div>
       <div class="kpi"><b>${defect.noExcel.length}</b><span>有缺陷相無 Excel</span></div>
-      <div class="kpi"><b>${defect.stdSkipped}</b><span>唔計標準四張</span></div>`;
+      <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>`;
+    warnNoUnderscore(P);
+    if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
     renderMatrix(mtxList, P, {defectMode:true, excel});
     renderDefect(defect);
     renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown});
@@ -728,15 +762,18 @@ function run(){
   last={mode:"four", A,P,excel,complete,incomplete,onlyA,onlyP,checkList,showUnknown,showFmt,defect:null};
   const heic=P.items.filter(x=>/\.hei[cf]$/i.test(x.line)).length;
   const jpg=P.items.filter(x=>/\.jpe?g$/i.test(x.line)).length;
+  const noU=(P.noUnderscore||[]).length;
   document.getElementById("kpis").innerHTML=`
     <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
     <div class="kpi"><b>${P.trees.length}</b><span>有相片的樹<br>（${P.items.length} 張）</span></div>
     <div class="kpi"><b>${complete.length}</b><span>四張齊全</span></div>
     <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
+    <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>
     <div class="kpi"><b>${P.junk.length}</b><span>系統／垃圾檔</span></div>
     <div class="kpi"><b>${jpg}</b><span>JPG</span></div>
-    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>
-    <div class="kpi"><b>${P.rename.length}</b><span>建議改名</span></div>`;
+    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>`;
+  warnNoUnderscore(P);
+  if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
   renderMatrix(checkList, P, {defectMode:false});
   renderDefect(null);
   renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown});
@@ -819,6 +856,7 @@ function renderLists(S){
     html+='<div class="grid" style="margin-top:12px">';
     html+=box("其他角度","info",extraLines);
     html+=box("無法抽出樹號","extra",S.P.unknown);
+    html+=box("樹號後無 _","extra",S.P.noUnderscore||[]);
     html+=box("已過濾／系統檔","extra",S.P.junk);
     html+=box("檔名完全相同","extra",S.P.sameFile);
     html+="</div>";
@@ -1000,6 +1038,7 @@ function clearAll(){
   document.getElementById("listB").value="";
   const c=document.getElementById("listC"); if(c) c.value="";
   document.getElementById("kpis").innerHTML="";
+  const w=document.getElementById("warnNoUnderscore"); if(w){ w.style.display="none"; w.innerHTML=""; }
   ["p-matrix","p-lists","p-defect","p-rename","p-fmt"].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
   last=null;
 }
