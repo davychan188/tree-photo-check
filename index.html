@@ -81,7 +81,7 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <label><input type="checkbox" id="onlyFromA" checked/> 1↔2 時只睇名單 1 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
     <label><input type="checkbox" id="skipStdAngles" checked/> 2↔3 時唔計 Tag／Whole view／Trunk base／Crown</label>
-    <label><input type="checkbox" id="showUnknown" checked/> 顯示其他／過濾掉的檔</label>
+    <label><input type="checkbox" id="showUnknown" checked/> 顯示缺陷清單／過濾掉的檔</label>
     <label><input type="checkbox" id="showFmt"/> 顯示數字後格式差異</label>
   </div>
   <div class="grid grid3">
@@ -163,8 +163,11 @@ function isJunk(name){
   if(base.startsWith(".")) return "隱藏檔";
   if(JUNK_NAME.test(base)) return "系統檔";
   if(/\.(jpe?g|png|heic|heif|webp|gif|bmp|tif|tiff)\.(jpe?g|png|heic|heif|webp)$/i.test(base)) return "重複副檔名";
+  if(/\.(xlsx?|xls|csv|docx?|pptx?|pdf|txt|zip|rar|7z|exe|lnk)$/i.test(base)) return "非圖片檔";
+  if(/^新增\s/i.test(base) && /excel|工作表/i.test(base)) return "非圖片檔";
   return "";
 }
+
 function extractTreeId(line, slash){
   let s = stripExt(normId(line, slash));
   if(!s) return "";
@@ -743,7 +746,7 @@ function run(){
     if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
     renderMatrix(mtxList, P, {defectMode:true, excel});
     renderDefect(defect);
-    renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown});
+    renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown,checkList:mtxList});
     // keep rename/fmt quiet unless asked
     const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
     const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
@@ -776,7 +779,7 @@ function run(){
   if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
   renderMatrix(checkList, P, {defectMode:false});
   renderDefect(null);
-  renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown});
+  renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown,checkList});
   const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
   const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
 }
@@ -841,28 +844,56 @@ function renderLists(S){
     if(x.have.length) bits.push("    已有："+x.have.join("、"));
     return bits.join("\n");
   });
-  const extraLines=[];
+
+  const filesBy = {};
+  (S.P.items||[]).forEach(it=>{
+    const k=it.id+"\0"+it.type;
+    (filesBy[k]=filesBy[k]||[]).push(it.line);
+  });
+
+  const multiLines=[];
+  const treeOrder = (S.checkList && S.checkList.length) ? S.checkList : (S.P.trees||[]);
+  const allIds = uniqueInOrder([...treeOrder, ...(S.P.trees||[])]);
+  allIds.forEach(id=>{
+    const rec=S.P.byTree[id];
+    if(!rec) return;
+    const bits=[];
+    const types = new Set([...NEED, ...Object.keys(rec.typeCnt||{})]);
+    [...types].forEach(t=>{
+      const files = filesBy[id+"\0"+t] || (rec.byNeed && rec.byNeed[t]) || [];
+      const n = files.length || (rec.typeCnt[t]||0);
+      if(n>1){
+        bits.push("  "+t+" ×"+n);
+        files.forEach(fn=>bits.push("    ← "+fn));
+      }
+    });
+    if(bits.length) multiLines.push(id+"\n"+bits.join("\n"));
+  });
+
+  const defectLines=[];
   for(const id of S.P.trees){
     const rec=S.P.byTree[id];
-    if(rec.extras.length) extraLines.push(id+"\n  "+rec.extras.join("\n  "));
+    if(rec.extras.length) defectLines.push(id+"\n  "+rec.extras.join("\n  "));
   }
   let html='<div class="grid">';
   html+=box("四張齊全","ok",S.complete.map(x=>x.id));
   html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
+  html+=box("同角度多於一張（矩陣橙色數字）","miss",multiLines);
   html+=box("只在名單 1（完全沒相片）","miss",S.onlyA);
   html+=box("只在相片名單","extra",S.onlyP);
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
-    html+=box("其他角度","info",extraLines);
+    html+=box("缺陷／非標準四張","info",defectLines);
     html+=box("無法抽出樹號","extra",S.P.unknown);
     html+=box("樹號後無 _","extra",S.P.noUnderscore||[]);
-    html+=box("已過濾／系統檔","extra",S.P.junk);
+    html+=box("已過濾／系統檔／非圖片","extra",S.P.junk);
     html+=box("檔名完全相同","extra",S.P.sameFile);
     html+="</div>";
   }
   document.getElementById("p-lists").innerHTML=html;
 }
+
 function esc(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
