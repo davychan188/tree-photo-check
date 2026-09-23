@@ -35,18 +35,27 @@ h3{margin:8px 0;font-size:14px}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:8px;margin-top:8px;background:#f8faf8;font-size:12px;color:#475569;text-align:center}
 .drop.over{border-color:var(--g);background:#ecfdf3}
 .drop input{display:none}
-.mtxwrap{overflow:auto;border:1px solid var(--line);border-radius:10px}
-table.mtx{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
-table.mtx th,table.mtx td{border:1px solid var(--line);padding:6px 8px;text-align:center;white-space:nowrap}
-table.mtx th{background:#ecf3ec;position:sticky;top:0;z-index:2}
+.mtxwrap{
+  overflow:auto;border:1px solid var(--line);border-radius:10px;
+  max-height:min(70vh, 640px);
+}
+table.mtx{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12px}
+table.mtx th,table.mtx td{border:1px solid var(--line);padding:6px 8px;text-align:center;white-space:nowrap;background:#fff}
+table.mtx th{
+  background:#ecf3ec;position:sticky;top:0;z-index:2;
+  box-shadow:0 1px 0 var(--line);
+}
 table.mtx th:first-child,table.mtx td.id{
   position:sticky;left:0;z-index:1;
   text-align:left;font-family:ui-monospace,Menlo,monospace;font-weight:700;
   background:#fafdfa;box-shadow:2px 0 0 var(--line);
+  min-width:7.5em;
 }
-table.mtx th:first-child{background:#ecf3ec;z-index:3}
+table.mtx th:first-child{background:#ecf3ec;z-index:4;box-shadow:2px 1px 0 var(--line)}
+table.mtx tr:nth-child(even) td{background:#fafdfa}
 table.mtx tr:nth-child(even) td.id{background:#f3f8f3}
-table.mtx tr:nth-child(even){background:#fafdfa}
+table.mtx tr:hover td{background:#f0fdf4}
+table.mtx tr:hover td.id{background:#e7f6ea}
 .cell-ok{background:#dcfce7;color:#166534;font-weight:700}
 .cell-no{background:#fee2e2;color:#991b1b;font-weight:700}
 .cell-more{background:#ffedd5;color:#9a3412}
@@ -81,7 +90,7 @@ table.mtx tr:nth-child(even){background:#fafdfa}
     <label><input type="checkbox" id="onlyFromA" checked/> 1↔2 時只睇名單 1 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
     <label><input type="checkbox" id="skipStdAngles" checked/> 2↔3 時唔計 Tag／Whole view／Trunk base／Crown</label>
-    <label><input type="checkbox" id="showUnknown" checked/> 顯示缺陷清單／過濾掉的檔</label>
+    <label><input type="checkbox" id="showUnknown" checked/> 顯示過濾掉／抽唔到樹號的檔</label>
     <label><input type="checkbox" id="showFmt"/> 顯示數字後格式差異</label>
   </div>
   <div class="grid grid3">
@@ -845,7 +854,7 @@ function renderMatrix(checkList, P, opt){
     }
     html+="</tr>";
   });
-  html+="</tbody></table></div><div class='hint'>橙色數字 = 標準四張同一角度多於一張。藍色 Defect 1／2… = 第 5、6 張缺陷相（滑鼠移上去睇檔名；清單有缺陷文字）。</div></div>";
+  html+="</tbody></table></div><div class='hint'>橙色數字 = 標準四張同一角度多於一張。藍色 Defect 1／2… = 第 5、6 張缺陷相（滑鼠移上去睇檔名）。左右／上下捲動時，樹號欄同 Tag／Whole view 等欄名會鎖住。</div></div>";
   document.getElementById("p-matrix").innerHTML=html;
 }
 
@@ -931,11 +940,6 @@ function renderLists(S){
     if(bits.length) multiLines.push(id+"\n"+bits.join("\n"));
   });
 
-  const defectLines=[];
-  for(const id of S.P.trees){
-    const rec=S.P.byTree[id];
-    if(rec.extras.length) defectLines.push(id+"\n  "+rec.extras.join("\n  "));
-  }
   let html='<div class="grid">';
   html+=box("四張齊全","ok",S.complete.map(x=>x.id));
   html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
@@ -945,7 +949,6 @@ function renderLists(S){
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
-    html+=box("缺陷／非標準四張","info",defectLines);
     html+=box("無法抽出樹號","extra",S.P.unknown);
     html+=box("樹號後無 _","extra",S.P.noUnderscore||[]);
     html+=box("已過濾／系統檔／非圖片","extra",S.P.junk);
