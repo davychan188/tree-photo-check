@@ -30,7 +30,7 @@ label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
 .kpi span{font-size:12px;color:#64748b}
 .col{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;font:12px/1.5 ui-monospace,Menlo,monospace;background:#fafdfa;white-space:pre-wrap}
 h3{margin:8px 0;font-size:14px}
-.ok{color:var(--ok)}.miss{color:var(--miss)}.extra{color:var(--bad)}.info{color:var(--info)}
+.ok{color:var(--ok)}.miss{color:var(--miss)}.extra{color:var(--bad)}.info{color:var(--info)}.warn{color:#a16207}
 .hint{font-size:12px;color:#64748b;font-weight:400;margin-top:4px}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:8px;margin-top:8px;background:#f8faf8;font-size:12px;color:#475569;text-align:center}
 .drop.over{border-color:var(--g);background:#ecfdf3}
@@ -116,7 +116,7 @@ table.mtx tr:hover td.id{background:#e7f6ea}
       <label>C Excel（樹號 + 缺陷）</label>
       <textarea id="listC" placeholder="TG-T0175&#9;Co-dominant branches&#10;TG-T0176&#9;Wilted crown&#10;T-2225&#9;Leaning"></textarea>
       <div class="drop" id="dropC">拖 Excel 匯出嘅 .txt／.csv 到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" accept=".txt,.csv,text/plain" onchange="filesToBox(event,'listC',false)">選檔</label></div>
-      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。</div>
+      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。會檢查缺陷文字疑似錯字（例如 inc;uded）。</div>
     </div>
   </div>
   <div class="btns">
@@ -596,6 +596,163 @@ function isStdAngleSuffix(suf){
   const u=normDefect(suf).toUpperCase();
   return STD_ANGLES.has(u);
 }
+
+/** Known arboriculture defect misspellings → fix (keys lowercase). Easy to extend. */
+const DEFECT_TYPO_MAP = {
+  "incuded":"included","incluuded":"included","includd":"included",
+  "inc;uded":"included","inc:uded":"included","inclded":"included","inlcuded":"included",
+  "leaninig":"leaning","leanng":"leaning","leanin":"leaning","leaing":"leaning",
+  "wiltted":"wilted","wiltedd":"wilted","wilteddd":"wilted","wiltled":"wilted",
+  "coodominant":"co-dominant","codominent":"co-dominant","codominat":"co-dominant",
+  "codominanat":"co-dominant","co-dominent":"co-dominant","codominant":"co-dominant",
+  "sparce":"sparse","sparcee":"sparse","sparsse":"sparse",
+  "folage":"foliage","foilage":"foliage","foliagee":"foliage","foiliage":"foliage",
+  "brachnes":"branches","brances":"branches","braches":"branches","branchs":"branches",
+  "decy":"decay","deacy":"decay","deccay":"decay",
+  "trnk":"trunk","trunck":"trunk","truk":"trunk",
+  "crowm":"crown","cown":"crown",
+  "barkk":"bark","barck":"bark",
+  "fungul":"fungal","fungel":"fungal",
+  "fruting":"fruiting","fruitng":"fruiting",
+  "dehydratd":"dehydrated","dehydated":"dehydrated","dehyrdated":"dehydrated",
+  "mulitple":"multiple","mutiple":"multiple","multipel":"multiple",
+  "broekn":"broken","borken":"broken","breoken":"broken",
+  "woond":"wound","woud":"wound","wund":"wound"
+};
+
+/** Common defect tokens (incl. plurals) — used by edit-distance suggestion. */
+const DEFECT_ALLOWLIST = new Set([
+  "leaning","leanings","wilted","crown","crowns","trunk","trunks","decay","wound","wounds",
+  "sparse","foliage","included","bark","codominant","co-dominant","dominant","dominants",
+  "branches","branch","fungal","fruiting","body","bodies","dehydrated","dead","wood",
+  "multiple","broken","cavity","cavities","crack","cracks","split","splits","deadwood",
+  "epicormic","girdling","root","roots","soil","canopy","dieback","hanging","crossing",
+  "includedbark","codominanttrunks","codominantbranches","with","and","on","of","the","a","an"
+].map(s=>s.toLowerCase()));
+
+function editDistance1(a,b){
+  a=String(a); b=String(b);
+  if(a===b) return 0;
+  const la=a.length, lb=b.length;
+  if(Math.abs(la-lb)>1) return 2;
+  if(la>lb) return editDistance1(b,a);
+  // la <= lb; la==lb or la+1==lb
+  let i=0,j=0,edits=0;
+  while(i<la && j<lb){
+    if(a[i]===b[j]){ i++; j++; continue; }
+    edits++;
+    if(edits>1) return 2;
+    if(la===lb){ i++; j++; }
+    else j++; // insertion in b
+  }
+  if(j<lb || i<la) edits++;
+  return edits;
+}
+function isPluralOnlyDiff(a,b){
+  const x=String(a).toLowerCase(), y=String(b).toLowerCase();
+  if(x===y) return true;
+  if(x===y+"s" || y===x+"s") return true;
+  if(x===y+"es" || y===x+"es") return true;
+  if((x.endsWith("ies") && y===x.slice(0,-3)+"y") || (y.endsWith("ies") && x===y.slice(0,-3)+"y")) return true;
+  return false;
+}
+function lettersKey(s){
+  return String(s||"").toLowerCase().replace(/[^a-z]/g,"");
+}
+function allowlistHasToken(tok){
+  const low=String(tok||"").toLowerCase();
+  if(DEFECT_ALLOWLIST.has(low)) return true;
+  const k=lettersKey(low);
+  if(DEFECT_ALLOWLIST.has(k)) return true;
+  if(DEFECT_ALLOWLIST.has(low.replace(/-/g,""))) return true;
+  return false;
+}
+function knownWord(s){
+  const low=String(s||"").toLowerCase();
+  if(allowlistHasToken(low)) return true;
+  // reverse map values
+  for(const v of Object.values(DEFECT_TYPO_MAP)){
+    if(v.toLowerCase()===low || lettersKey(v)===lettersKey(low)) return true;
+  }
+  return false;
+}
+/** Find suspected typos in one defect string. Returns [{word, suggestion, reason}]. */
+function findTyposInText(text){
+  const s=String(text||"");
+  if(!s.trim()) return [];
+  const found=[];
+  const seen=new Set();
+  const push=(word, suggestion, reason)=>{
+    const k=(word||"")+"\0"+(suggestion||"")+"\0"+(reason||"");
+    if(seen.has(k)) return;
+    seen.add(k);
+    found.push({word, suggestion, reason});
+  };
+  // tokens: keep mid-word ;:`'´ and hyphens
+  const tokens=s.match(/[A-Za-z][A-Za-z;:`'´\-]*/g)||[];
+  for(const tok of tokens){
+    const low=tok.toLowerCase();
+    // 1) Mid-word punctuation
+    const mid=tok.match(/^([A-Za-z]{2,})([;:`'´])([A-Za-z]{2,})$/);
+    if(mid){
+      const bad=mid[2];
+      let suggestion="";
+      const removed=mid[1]+mid[3];
+      const asL=(bad===";")?(mid[1]+"l"+mid[3]):"";
+      if(asL && knownWord(asL)) suggestion=asL.toLowerCase()==="included"?"included":asL;
+      else if(DEFECT_TYPO_MAP[low]) suggestion=DEFECT_TYPO_MAP[low];
+      else if(knownWord(removed)) suggestion=removed;
+      else if(asL) suggestion=asL;
+      else suggestion=removed;
+      // prefer canonical from map
+      if(DEFECT_TYPO_MAP[low]) suggestion=DEFECT_TYPO_MAP[low];
+      else if(DEFECT_TYPO_MAP[removed.toLowerCase()]) suggestion=DEFECT_TYPO_MAP[removed.toLowerCase()];
+      else if(asL && DEFECT_TYPO_MAP[asL.toLowerCase()]) suggestion=DEFECT_TYPO_MAP[asL.toLowerCase()];
+      push(tok, suggestion, "字中間有 "+bad);
+      continue;
+    }
+    // 2) Known misspellings map
+    if(DEFECT_TYPO_MAP[low]){
+      push(tok, DEFECT_TYPO_MAP[low], "常見錯字");
+      continue;
+    }
+    // 3) Edit-distance 1 to exactly one allowlist term (not plural-only)
+    const key=lettersKey(tok);
+    if(key.length<4) continue;
+    if(allowlistHasToken(tok) || allowlistHasToken(key)) continue;
+    const hits=[];
+    for(const w of DEFECT_ALLOWLIST){
+      const wk=lettersKey(w);
+      if(wk.length<3) continue;
+      if(isPluralOnlyDiff(key, wk)) continue;
+      if(editDistance1(key, wk)===1) hits.push(w);
+    }
+    // unique by lettersKey
+    const uniq=[];
+    const uk=new Set();
+    for(const h of hits){
+      const k=lettersKey(h);
+      if(uk.has(k)) continue;
+      uk.add(k); uniq.push(h);
+    }
+    if(uniq.length===1){
+      push(tok, uniq[0], "接近常用詞");
+    }
+  }
+  return found;
+}
+function collectTypoHits(id, side, text, bag, seen){
+  const t=String(text||"").trim();
+  if(!t) return;
+  const hits=findTyposInText(t);
+  for(const h of hits){
+    const k=(id||"")+"\0"+side+"\0"+(h.word||"").toLowerCase()+"\0"+(h.suggestion||"").toLowerCase();
+    if(seen.has(k)) continue;
+    seen.add(k);
+    bag.push({id:id||"", side, text:t, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
+  }
+}
+
 function photoSuffix(line, id){
   const raw=stripExt(line);
   let s=restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
@@ -608,10 +765,11 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
   // excel rows: {id, defect, raw} — prefer id-tagged Excel lines
   // Defect mode (2↔3): IGNORE onlyFromA — always compare all Excel ↔ photos
   const hasIds = excel.some(r=>r && r.id);
-  const matched=[], mismatch=[], noPhoto=[], noExcel=[], blankExcel=[], extras=[];
+  const matched=[], mismatch=[], noPhoto=[], noExcel=[], blankExcel=[], extras=[], typos=[];
   let stdSkipped=0;
   const usedPhoto=new Set();
   const usedExcel=new Set();
+  const typoSeen=new Set();
 
   const treesFromA = (A.rows && A.rows.length) ? uniqueInOrder(A.rows) : (A.uniq.length ? A.uniq.slice() : []);
 
@@ -648,6 +806,11 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
   uniqJobs.forEach(j=>{
     const id=j.id||"";
     const excelText=j.excel||"";
+    // C: full cell first (catches mid-word ;), then parts same as matching
+    if(excelText){
+      collectTypoHits(id, "C", excelText, typos, typoSeen);
+      splitDefectParts(excelText).forEach(part=>collectTypoHits(id, "C", part, typos, typoSeen));
+    }
     const rec=(id && P.byTree[id]) ? P.byTree[id] : null;
     const photos=(rec?rec.files:[]).map(fn=>{
       const suf=photoSuffix(fn, id);
@@ -657,7 +820,10 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
       if(p.std && skipStd){ stdSkipped++; return false; }
       return !!p.suf;
     });
-    defectPhotos.forEach(p=>usedPhoto.add(String(p.fn).toUpperCase()));
+    defectPhotos.forEach(p=>{
+      usedPhoto.add(String(p.fn).toUpperCase());
+      collectTypoHits(id, "B", p.suf, typos, typoSeen);
+    });
     if(j.excelIdx>=0) usedExcel.add(j.excelIdx);
 
     if(!id && excelText){ noPhoto.push({id:"(無樹號)", excel:excelText, photos:[]}); return; }
@@ -688,11 +854,12 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
     if(!suf) continue;
     if(skipStd && isStdAngleSuffix(suf)){ stdSkipped++; continue; }
     extras.push({id:it.id, fn:it.line, suf, src:it.src||it.line});
+    collectTypoHits(it.id, "B", suf, typos, typoSeen);
   }
 
   const excelCount = excel.filter(r=>r && (r.id || r.defect)).length;
   const treeCount = hasIds ? new Set(excel.map(r=>r.id).filter(Boolean)).size : treesFromA.length;
-  return {matched, mismatch, noPhoto, noExcel, blankExcel, extras, stdSkipped, treeCount, excelCount, pairedById:hasIds};
+  return {matched, mismatch, noPhoto, noExcel, blankExcel, extras, typos, stdSkipped, treeCount, excelCount, pairedById:hasIds};
 }
 
 
@@ -707,12 +874,19 @@ function renderDefect(D){
     const ph=(o.suffixes||(o.photos||[]).map(p=>p.suf||p)).filter(Boolean).join(" | ")||"—";
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
+  const typoLine=t=>{
+    let s=`${t.id}  |  ${t.side}: ${t.text}`;
+    if(t.suggestion) s+=`  |  建議: ${t.suggestion}`;
+    if(t.reason) s+=`  |  原因: ${t.reason}`;
+    return s;
+  };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。會檢查缺陷文字疑似錯字（例如 inc;uded）。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
   html+=box("唔啱（C 有字但同 B 唔同）","miss", D.mismatch.map(line));
+  html+=box("疑似錯字","warn", (D.typos||[]).map(typoLine));
   html+=box("C 空白／無缺陷字（有樹號／有相）","miss", (D.blankExcel||[]).map(line));
   html+=box("有 C 無缺陷相","miss", D.noPhoto.map(line));
   html+=box("有缺陷相無 C","extra", D.noExcel.map(line));
@@ -798,11 +972,13 @@ function run(){
     last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
     const noU=(P.noUnderscore||[]).length;
     const blankN=(defect.blankExcel||[]).length;
+    const typoN=(defect.typos||[]).length;
     document.getElementById("kpis").innerHTML=`
       <div class="kpi"><b>${excel.length}</b><span>C 行</span></div>
       <div class="kpi"><b>${P.items.length}</b><span>B 相片</span></div>
       <div class="kpi"><b>${defect.matched.length}</b><span>對上</span></div>
       <div class="kpi"><b>${defect.mismatch.length}</b><span>唔啱</span></div>
+      <div class="kpi"><b>${typoN}</b><span>疑似錯字</span></div>
       <div class="kpi"><b>${blankN}</b><span>C 空白</span></div>
       <div class="kpi"><b>${defect.noPhoto.length}</b><span>有 C 無缺陷相</span></div>
       <div class="kpi"><b>${defect.noExcel.length}</b><span>有缺陷相無 C</span></div>
