@@ -564,13 +564,33 @@ function normDefect(s){
     .replace(/\s+/g," ")
     .trim();
 }
+function splitDefectParts(s){
+  return String(s||"").split(/[,，;；]+/).map(x=>x.trim()).filter(Boolean);
+}
 function defectMatch(a,b){
   const x=normDefect(a), y=normDefect(b);
   if(!x||!y) return false;
   if(x===y) return true;
-  // tight alternate only: same after stripping all spaces — no substring/includes
+  // hyphen/space only: "Co-dominant" ≡ "Co dominant" — never substring (leaning ≠ leanings)
   if(x.replace(/\s+/g,"")===y.replace(/\s+/g,"")) return true;
   return false;
+}
+/** Exact multiset: every C part ↔ one B suffix (normDefect), no leftovers. */
+function defectsExactEqual(excelText, suffixes){
+  const parts=splitDefectParts(excelText);
+  const sufs=(suffixes||[]).map(s=>String(s||"").trim()).filter(Boolean);
+  if(!parts.length || !sufs.length || parts.length!==sufs.length) return false;
+  const used=new Set();
+  for(const part of parts){
+    let found=-1;
+    for(let i=0;i<sufs.length;i++){
+      if(used.has(i)) continue;
+      if(defectMatch(part, sufs[i])){ found=i; break; }
+    }
+    if(found<0) return false;
+    used.add(found);
+  }
+  return used.size===sufs.length;
 }
 function isStdAngleSuffix(suf){
   const u=normDefect(suf).toUpperCase();
@@ -654,9 +674,12 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
       noPhoto.push({id, excel:excelText, photos:photos.filter(p=>p.std)});
       return;
     }
-    const hit=defectPhotos.filter(p=>defectMatch(p.suf, excelText));
-    if(hit.length) matched.push({id, excel:excelText, photos:hit, suffixes:hit.map(p=>p.suf), other:defectPhotos.filter(p=>!hit.includes(p))});
-    else mismatch.push({id, excel:excelText, photos:defectPhotos, suffixes:defectPhotos.map(p=>p.suf)});
+    const suffixes=defectPhotos.map(p=>p.suf);
+    if(defectsExactEqual(excelText, suffixes)){
+      matched.push({id, excel:excelText, photos:defectPhotos, suffixes, other:[]});
+    }else{
+      mismatch.push({id, excel:excelText, photos:defectPhotos, suffixes});
+    }
   });
 
   for(const it of (P.items||[])){
@@ -685,7 +708,7 @@ function renderDefect(D){
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：忽略大小寫／標點／空格／底線，不做部分字串）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
