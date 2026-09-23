@@ -164,10 +164,18 @@ function isJunk(name){
   if(JUNK_NAME.test(base)) return "系統檔";
   if(/\.(jpe?g|png|heic|heif|webp|gif|bmp|tif|tiff)\.(jpe?g|png|heic|heif|webp)$/i.test(base)) return "重複副檔名";
   if(/\.(xlsx?|xls|csv|docx?|pptx?|pdf|txt|zip|rar|7z|exe|lnk)$/i.test(base)) return "非圖片檔";
-  if(/^新增\s/i.test(base) && /excel|工作表/i.test(base)) return "非圖片檔";
+  if(/^新增/.test(base) || /^新建/.test(base)) return "非相片（新增／新建檔）";
+  if(/microsoft\s*excel|工作表/i.test(base)) return "非相片（Excel）";
   return "";
 }
 
+function isPlausibleTreeId(id){
+  if(!id) return false;
+  if(!/\d/.test(id)) return false;
+  if(/^新增|^新建|MICROSOFT|EXCEL|WORKSHEET|DOCUMENT|UNTITLED/i.test(id)) return false;
+  if(/工作表|新檔案/.test(id)) return false;
+  return true;
+}
 function extractTreeId(line, slash){
   let s = stripExt(normId(line, slash));
   if(!s) return "";
@@ -258,7 +266,11 @@ function parsePhotos(text, slash, filterJunk){
     fileCnt[key].n++;
     const {id, type} = classifyType(line, slash);
     if(!id){ unknown.push(parsed.hasDir ? src : line); continue; }
-    if(!byTree[id]) byTree[id]={types:new Set(), typeCnt:{}, files:[], extras:[], byNeed:{}};
+    if(!isPlausibleTreeId(id)){
+      junk.push("非樹號 ← " + (parsed.hasDir ? src : line));
+      continue;
+    }
+    if(!byTree[id]) byTree[id]={types:new Set(), typeCnt:{}, files:[], extras:[], defects:[], byNeed:{}};
     byTree[id].files.push(line);
     byTree[id].typeCnt[type]=(byTree[id].typeCnt[type]||0)+1;
     if(NEED.includes(type)){
@@ -267,6 +279,7 @@ function parsePhotos(text, slash, filterJunk){
       byTree[id].byNeed[type].push(line);
     }else{
       byTree[id].extras.push(type + " ← " + line);
+      byTree[id].defects.push({line, type, desc:type});
     }
     const fmt = formatOf(line, id);
     items.push({id, type, line, src, hasDir: parsed.hasDir, ext, fmt});
@@ -798,31 +811,18 @@ function run(){
 
 function renderMatrix(checkList, P, opt){
   opt = opt || {};
-  const extraTypes=new Set();
+  // Non-standard photos → Defect 1, Defect 2… (no description in column headers)
+  let maxDef = 0;
   checkList.forEach(id=>{
     const rec=P.byTree[id];
-    if(!rec) return;
-    Object.keys(rec.typeCnt).forEach(t=>{ if(!NEED.includes(t)) extraTypes.add(t); });
+    const n = rec && rec.defects ? rec.defects.length : 0;
+    if(n > maxDef) maxDef = n;
   });
-  // In 2↔3 mode, prefer defect columns from Excel + photo extras; still show NEED if present
-  let extras=[...extraTypes].sort(sortId);
-  if(opt.defectMode && opt.excel){
-    const fromExcel=new Set();
-    (opt.excel||[]).forEach(r=>{
-      if(r && r.defect){
-        const t=prettyDesc(r.defect.replace(/\s*[\(（]\s*\d+\s*[\)）]\s*$/u,""));
-        if(t) fromExcel.add(t);
-      }
-    });
-    // put excel defects first, then other photo types
-    const rest=extras.filter(t=>!fromExcel.has(t));
-    extras=[...fromExcel].sort(sortId).concat(rest);
-  }
-  // limit columns for UI but allow more in defect mode
-  const maxExtra = opt.defectMode ? 24 : 12;
-  extras = extras.slice(0, maxExtra);
-  const heads=["樹號",...NEED,...extras];
-  let html='<div class="card"><h3 class="info">矩陣預覽（✓ 有　— 欠　數字 = 同角度張數，例如 (1)(2)）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
+  if(maxDef > 8) maxDef = 8;
+  const defectHeads = [];
+  for(let i=1;i<=maxDef;i++) defectHeads.push("Defect "+i);
+  const heads=["樹號",...NEED,...defectHeads];
+  let html='<div class="card"><h3 class="info">矩陣預覽（✓ 有　— 欠　數字 = 同角度張數）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
   heads.forEach(h=>html+=`<th>${esc(h)}</th>`);
   html+="</tr></thead><tbody>";
   checkList.forEach(id=>{
@@ -834,15 +834,18 @@ function renderMatrix(checkList, P, opt){
       else if(n>1) html+=`<td class="cell-more" title="多於一張（例如 (1)(2)）">${n}</td>`;
       else html+=`<td class="cell-no">—</td>`;
     });
-    extras.forEach(t=>{
-      const n=rec&&rec.typeCnt[t]?rec.typeCnt[t]:0;
-      if(n===1) html+=`<td class="cell-oth">✓</td>`;
-      else if(n>1) html+=`<td class="cell-more" title="${esc(t)} ×${n}">${n}</td>`;
-      else html+=`<td></td>`;
-    });
+    for(let i=0;i<maxDef;i++){
+      const d = rec && rec.defects ? rec.defects[i] : null;
+      if(d){
+        const tip = esc((d.type||"") + " ← " + (d.line||""));
+        html+=`<td class="cell-oth" title="${tip}">✓</td>`;
+      } else {
+        html+=`<td></td>`;
+      }
+    }
     html+="</tr>";
   });
-  html+="</tbody></table></div><div class='hint'>橙色數字 = 同一類型多於一張（檔名有 (1)(2) 都會合併計入）。藍色 = 非標準四張／缺陷類型。</div></div>";
+  html+="</tbody></table></div><div class='hint'>橙色數字 = 標準四張同一角度多於一張。藍色 Defect 1／2… = 第 5、6 張缺陷相（滑鼠移上去睇檔名；清單有缺陷文字）。</div></div>";
   document.getElementById("p-matrix").innerHTML=html;
 }
 
