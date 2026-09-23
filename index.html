@@ -790,23 +790,14 @@ function run(){
     else incomplete.push({id,miss,have,extras:rec.extras||[],files:rec.files,byNeed:rec.byNeed});
   }
   last={mode:"four", A,P,excel,complete,incomplete,onlyA,onlyP,checkList,showUnknown,showFmt,defect:null};
-  const heic=P.items.filter(x=>/\.hei[cf]$/i.test(x.line)).length;
-  const jpg=P.items.filter(x=>/\.jpe?g$/i.test(x.line)).length;
   const noU=(P.noUnderscore||[]).length;
-  const bothN=A.uniq.filter(id=>P.byTree[id]).length;
   document.getElementById("kpis").innerHTML=`
     <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
     <div class="kpi"><b>${P.trees.length}</b><span>有相片的樹</span></div>
     <div class="kpi"><b>${onlyA.length}</b><span>只在名單 1</span></div>
     <div class="kpi"><b>${onlyP.length}</b><span>只在相片</span></div>
-    <div class="kpi"><b>${bothN}</b><span>兩邊都有</span></div>
-    <div class="kpi"><b>${P.rawN||0}</b><span>貼入檔名行<br>（計入 ${P.items.length}）</span></div>
-    <div class="kpi"><b>${jpg}</b><span>JPG</span></div>
-    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>
-    <div class="kpi"><b>${P.junk.length}</b><span>過濾／垃圾</span></div>
-    <div class="kpi"><b>${(P.unknown||[]).length}</b><span>抽唔到樹號</span></div>
-    <div class="kpi"><b>${complete.length}</b><span>四張齊全</span></div>
-    <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>`;
+    <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
+    <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>`;
   warnNoUnderscore(P);
   if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
   renderMatrix(checkList, P, {defectMode:false});
@@ -868,36 +859,13 @@ function extBreakdownLines(cnt){
 }
 
 function renderDiff(S){
-  const P=S.P, A=S.A;
-  const both = (A.uniq||[]).filter(id=>P.byTree[id]);
-  const extAll = extBreakdownLines(P.extAll);
-  const extKeep = extBreakdownLines(P.extCnt);
-  const junkBy={};
-  (P.junk||[]).forEach(line=>{
-    const m=line.match(/^([^←]+)←/);
-    const k=(m?m[1]:"其他").trim();
-    junkBy[k]=(junkBy[k]||0)+1;
-  });
-  const junkSum=Object.keys(junkBy).sort(sortId).map(k=>k+" ×"+junkBy[k]);
-
   let html='<div class="grid" style="margin-bottom:12px">';
-  html+=box("名單分別：只在名單 1（無任何相）","miss", S.onlyA||[]);
-  html+=box("名單分別：只在相片（唔喺名單 1）","extra", S.onlyP||[]);
-  html+=box("兩邊都有（有樹號又有相）","ok", both);
-  html+=box("貼入檔名行數／副檔名（全部）","info",
-    ["貼入有效行："+(P.rawN||0),
-     "計入檢查："+(P.items||[]).length,
-     "抽唔到樹號："+(P.unknown||[]).length,
-     "過濾／垃圾："+(P.junk||[]).length,
-     "—— 全部副檔名 ——"].concat(extAll.length?extAll:["—"]));
-  html+=box("計入檢查嘅副檔名","info", extKeep.length?extKeep:["—"]);
-  if((P.junk||[]).length) html+=box("已過濾分類","extra", junkSum.concat(["——"], (P.junk||[]).slice(0,200)));
-  if((P.unknown||[]).length) html+=box("抽唔到樹號嘅檔","extra", P.unknown);
+  html+=box("只在名單 1（無任何相）","miss", S.onlyA||[]);
+  html+=box("只在相片（唔喺名單 1）","extra", S.onlyP||[]);
   html+="</div>";
   const el=document.getElementById("p-diff");
   if(el) el.innerHTML=html;
   else {
-    // inject before p-lists if missing
     const lists=document.getElementById("p-lists");
     if(lists){
       const d=document.createElement("div");
@@ -941,18 +909,13 @@ function renderLists(S){
   });
 
   let html='<div class="grid">';
-  html+=box("四張齊全","ok",S.complete.map(x=>x.id));
   html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
   html+=box("同角度多於一張（矩陣橙色數字）","miss",multiLines);
-  html+=box("只在名單 1（同上「名單分別」）","miss",S.onlyA);
-  html+=box("只在相片名單（同上「名單分別」）","extra",S.onlyP);
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
     html+=box("無法抽出樹號","extra",S.P.unknown);
     html+=box("樹號後無 _","extra",S.P.noUnderscore||[]);
-    html+=box("已過濾／系統檔／非圖片","extra",S.P.junk);
-    html+=box("檔名完全相同","extra",S.P.sameFile);
     html+="</div>";
   }
   document.getElementById("p-lists").innerHTML=html;
