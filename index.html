@@ -71,18 +71,18 @@ table.mtx tr:nth-child(even){background:#fafdfa}
 <body>
 <header>
   <h1>樹木相片／缺陷對比</h1>
-  <p>名單 1 = 樹編號；名單 2 = 相片路徑／檔名；名單 3 = Excel 缺陷文字。可做齊套四張，或對比缺陷描述與相片 <code>_</code> 後文字。</p>
+  <p>名單 1 = 樹編號；名單 2 = 相片路徑／檔名；名單 3 = Excel（樹號 + 缺陷）。檢查可揀 1↔2 矩陣，或 2↔3 缺陷對比。</p>
 </header>
 <div class="wrap">
   <div class="opts">
-    <label><input type="radio" name="mode" id="modeFour"/> 齊套四張（Tag／Whole view／Trunk base／Crown）</label>
-    <label><input type="radio" name="mode" id="modeDefect" checked/> Excel 缺陷文字 ↔ 相片路徑對比</label>
+    <label><input type="radio" name="mode" id="mode12" checked/> 檢查 1↔2（樹號 ↔ 相片矩陣）</label>
+    <label><input type="radio" name="mode" id="mode23"/> 檢查 2↔3（相片 ↔ Excel 缺陷）</label>
     <label><input type="checkbox" id="slashHSW"/> 把 H/SW 當成 HSW</label>
-    <label><input type="checkbox" id="onlyFromA" checked/> 只檢查／對比名單 1 內的樹</label>
+    <label><input type="checkbox" id="onlyFromA" checked/> 1↔2 時只睇名單 1 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
-    <label><input type="checkbox" id="skipStdAngles" checked/> 缺陷模式略過 Tag／Whole view／Trunk base／Crown</label>
+    <label><input type="checkbox" id="skipStdAngles" checked/> 2↔3 時唔計 Tag／Whole view／Trunk base／Crown</label>
     <label><input type="checkbox" id="showUnknown" checked/> 顯示其他／過濾掉的檔</label>
-    <label><input type="checkbox" id="showFmt" checked/> 顯示數字後格式差異</label>
+    <label><input type="checkbox" id="showFmt"/> 顯示數字後格式差異</label>
   </div>
   <div class="grid grid3">
     <div class="card">
@@ -112,22 +112,13 @@ table.mtx tr:nth-child(even){background:#fafdfa}
   </div>
   <div class="btns">
     <button class="btn" onclick="run()">檢查</button>
-    <button class="btn btn2" onclick="copyShort()">複製欠相短訊</button>
-    <button class="btn btn2" onclick="dlMissing()">欠相清單</button>
-    <button class="btn btn2" onclick="dl()">完整 CSV</button>
-    <button class="btn btn2" onclick="dlExcelPhotos()">匯出 Excel（檔名／_後）</button>
-    <button class="btn btn2" onclick="copyExcelPhotos()">複製給 Excel</button>
-    <button class="btn btn2" onclick="dlDefect()">缺陷對比 CSV</button>
-    <button class="btn btn2" onclick="copyDefect()">複製缺陷對比</button>
-    <button class="btn btn2" onclick="swap()">對調 1/2</button>
     <button class="btn btn2" onclick="clearAll()">清空</button>
   </div>
   <div class="kpis" id="kpis"></div>
   <div class="tabs">
-    <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣／對比</button>
+    <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣</button>
+    <button class="tab" data-p="defect" onclick="tab(this)">2↔3 結果</button>
     <button class="tab" data-p="lists" onclick="tab(this)">清單</button>
-    <button class="tab" data-p="defect" onclick="tab(this)">缺陷對比</button>
-    <button class="tab" data-p="fmt" onclick="tab(this)">數字後格式</button>
   </div>
   <div id="p-matrix" class="panel on"></div>
   <div id="p-lists" class="panel"></div>
@@ -204,7 +195,9 @@ function prettyDesc(s){
 function classifyType(line, slash){
   const raw = stripExt(line.trim());
   const id = extractTreeId(raw, slash);
-  const rest = restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
+  let rest = restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
+  // Strip trailing (1)/(2) so Wilted (1) and Wilted (2) share one matrix column
+  rest = rest.replace(/\s*[\(（]\s*\d+\s*[\)）]\s*$/u, "").trim();
   const r = rest.toUpperCase().replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim();
   if(!r) return {id, type:"Unknown", desc:""};
   if(r === "TAG") return {id, type:"Tag", desc:rest};
@@ -213,6 +206,7 @@ function classifyType(line, slash){
   if(r === "CROWN") return {id, type:"Crown", desc:rest};
   return {id, type:prettyDesc(rest), desc:rest};
 }
+
 function formatOf(line, id){
   const raw = stripExt(line.trim());
   let after = restAfterId(raw, id);
@@ -457,7 +451,8 @@ function uniqueInOrder(arr){
   return out;
 }
 
-function isDefectMode(){ return !!(document.getElementById("modeDefect")||{}).checked; }
+function isDefectMode(){ return !!(document.getElementById("mode23")||{}).checked; }
+function isMatrixMode(){ return !!(document.getElementById("mode12")||{}).checked; }
 
 function parseExcelLines(text, slash){
   const rows=[];
@@ -525,8 +520,11 @@ function isStdAngleSuffix(suf){
 }
 function photoSuffix(line, id){
   const raw=stripExt(line);
-  return restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
+  let s=restAfterId(raw, id).replace(/^[\s_\-]+/, "").trim();
+  s=s.replace(/\s*[\(（]\s*\d+\s*[\)）]\s*$/u, "").trim();
+  return s;
 }
+
 
 function buildDefectCompare(A, P, excel, checkList, skipStd){
   // excel rows: {id, defect, raw} — prefer id-tagged Excel lines
@@ -688,21 +686,33 @@ function run(){
 
   if(isDefectMode()){
     const defect=buildDefectCompare(A, P, excel, checkList, skipStd);
-    last={mode:"defect", A,P,excel,checkList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
+    // Matrix rows: Excel tree IDs + photo trees (respect onlyFromA if list A present)
+    let mtxList=[];
+    if(excel.some(r=>r&&r.id)){
+      mtxList = uniqueInOrder(excel.map(r=>r.id).filter(Boolean));
+      if(onlyFromA && A.uniq.length){
+        const setA=new Set(A.uniq);
+        mtxList = mtxList.filter(id=>setA.has(id));
+      }
+    } else {
+      mtxList = checkList.slice();
+    }
+    P.trees.forEach(id=>{ if(!mtxList.includes(id)) mtxList.push(id); });
+    last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
     document.getElementById("kpis").innerHTML=`
-      <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
-      <div class="kpi"><b>${excel.length}</b><span>Excel 行（含樹號）</span></div>
+      <div class="kpi"><b>${excel.length}</b><span>Excel 行</span></div>
       <div class="kpi"><b>${P.items.length}</b><span>相片檔</span></div>
       <div class="kpi"><b>${defect.matched.length}</b><span>對上</span></div>
       <div class="kpi"><b>${defect.mismatch.length}</b><span>唔啱</span></div>
       <div class="kpi"><b>${defect.noPhoto.length}</b><span>有 Excel 無缺陷相</span></div>
       <div class="kpi"><b>${defect.noExcel.length}</b><span>有缺陷相無 Excel</span></div>
-      <div class="kpi"><b>${defect.stdSkipped}</b><span>略過標準四張</span></div>`;
+      <div class="kpi"><b>${defect.stdSkipped}</b><span>唔計標準四張</span></div>`;
+    renderMatrix(mtxList, P, {defectMode:true, excel});
     renderDefect(defect);
-    document.getElementById("p-matrix").innerHTML = document.getElementById("p-defect").innerHTML;
     renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown});
-    renderRename(P);
-    renderFmt(P, showFmt);
+    // keep rename/fmt quiet unless asked
+    const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
+    const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
     return;
   }
 
@@ -727,42 +737,61 @@ function run(){
     <div class="kpi"><b>${jpg}</b><span>JPG</span></div>
     <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>
     <div class="kpi"><b>${P.rename.length}</b><span>建議改名</span></div>`;
-  renderMatrix(checkList, P);
+  renderMatrix(checkList, P, {defectMode:false});
   renderDefect(null);
   renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown});
-  renderRename(P);
-  renderFmt(P, showFmt);
+  const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
+  const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
 }
 
 
-function renderMatrix(checkList, P){
+function renderMatrix(checkList, P, opt){
+  opt = opt || {};
   const extraTypes=new Set();
   checkList.forEach(id=>{
     const rec=P.byTree[id];
     if(!rec) return;
     Object.keys(rec.typeCnt).forEach(t=>{ if(!NEED.includes(t)) extraTypes.add(t); });
   });
-  const extras=[...extraTypes].sort(sortId).slice(0,8);
+  // In 2↔3 mode, prefer defect columns from Excel + photo extras; still show NEED if present
+  let extras=[...extraTypes].sort(sortId);
+  if(opt.defectMode && opt.excel){
+    const fromExcel=new Set();
+    (opt.excel||[]).forEach(r=>{
+      if(r && r.defect){
+        const t=prettyDesc(r.defect.replace(/\s*[\(（]\s*\d+\s*[\)）]\s*$/u,""));
+        if(t) fromExcel.add(t);
+      }
+    });
+    // put excel defects first, then other photo types
+    const rest=extras.filter(t=>!fromExcel.has(t));
+    extras=[...fromExcel].sort(sortId).concat(rest);
+  }
+  // limit columns for UI but allow more in defect mode
+  const maxExtra = opt.defectMode ? 24 : 12;
+  extras = extras.slice(0, maxExtra);
   const heads=["樹號",...NEED,...extras];
-  let html='<div class="card"><h3 class="info">矩陣預覽（✓ 有　— 欠　數字 = 該角度張數）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
-  heads.forEach(h=>html+=`<th>${h}</th>`);
+  let html='<div class="card"><h3 class="info">矩陣預覽（✓ 有　— 欠　數字 = 同角度張數，例如 (1)(2)）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
+  heads.forEach(h=>html+=`<th>${esc(h)}</th>`);
   html+="</tr></thead><tbody>";
   checkList.forEach(id=>{
     const rec=P.byTree[id];
-    html+=`<tr><td class="id">${id}</td>`;
+    html+=`<tr><td class="id">${esc(id)}</td>`;
     NEED.forEach(t=>{
-      const n=rec&&rec.byNeed[t]?rec.byNeed[t].length:0;
+      const n=rec&&rec.byNeed[t]?rec.byNeed[t].length:(rec&&rec.typeCnt[t]?rec.typeCnt[t]:0);
       if(n===1) html+=`<td class="cell-ok">✓</td>`;
-      else if(n>1) html+=`<td class="cell-more">${n}</td>`;
+      else if(n>1) html+=`<td class="cell-more" title="多於一張（例如 (1)(2)）">${n}</td>`;
       else html+=`<td class="cell-no">—</td>`;
     });
     extras.forEach(t=>{
       const n=rec&&rec.typeCnt[t]?rec.typeCnt[t]:0;
-      html+= n?`<td class="cell-oth">${n}</td>`:`<td></td>`;
+      if(n===1) html+=`<td class="cell-oth">✓</td>`;
+      else if(n>1) html+=`<td class="cell-more" title="${esc(t)} ×${n}">${n}</td>`;
+      else html+=`<td></td>`;
     });
     html+="</tr>";
   });
-  html+="</tbody></table></div><div class='hint'>橙色數字 = 同一標準角度多於一張。藍色 = 非標準四張（例如 Wilted Crown）。</div></div>";
+  html+="</tbody></table></div><div class='hint'>橙色數字 = 同一類型多於一張（檔名有 (1)(2) 都會合併計入）。藍色 = 非標準四張／缺陷類型。</div></div>";
   document.getElementById("p-matrix").innerHTML=html;
 }
 
