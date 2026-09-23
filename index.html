@@ -236,18 +236,22 @@ function parseTrees(text, slash){
 
 function parsePhotos(text, slash, filterJunk){
   const items=[], unknown=[], junk=[], byTree={};
-  const fileCnt={}, extCnt={};
+  const fileCnt={}, extCnt={}, extAll={};
+  let rawN=0;
   for(const raw of text.split(/\r?\n/)){
     const parsed = normalizeInputLine(raw);
     if(!parsed) continue;
+    rawN++;
     const line = parsed.name;
     const src = parsed.src;
+    const ext0 = extOf(line) || "(無)";
+    extAll[ext0]=(extAll[ext0]||0)+1;
     const why = isJunk(line);
     if(why){
       junk.push(why + " ← " + (parsed.hasDir ? src : line));
       if(filterJunk) continue;
     }
-    const ext = extOf(line) || "(無)";
+    const ext = ext0;
     extCnt[ext]=(extCnt[ext]||0)+1;
     const key = line.toUpperCase();
     fileCnt[key]=fileCnt[key]||{n:0,sample:line};
@@ -346,7 +350,7 @@ function parsePhotos(text, slash, filterJunk){
     .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
 
   return {
-    items, byTree, unknown, junk, extCnt, noUnderscore,
+    items, byTree, unknown, junk, extCnt, extAll, rawN, noUnderscore,
     trees:Object.keys(byTree).sort(sortId),
     sameFile, combined, minorityFiles, rename:[], fmtAlts, majorityTail
   };
@@ -746,6 +750,7 @@ function run(){
     if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
     renderMatrix(mtxList, P, {defectMode:true, excel});
     renderDefect(defect);
+    renderDiff({onlyA,onlyP,P,A});
     renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown,checkList:mtxList});
     // keep rename/fmt quiet unless asked
     const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
@@ -766,19 +771,25 @@ function run(){
   const heic=P.items.filter(x=>/\.hei[cf]$/i.test(x.line)).length;
   const jpg=P.items.filter(x=>/\.jpe?g$/i.test(x.line)).length;
   const noU=(P.noUnderscore||[]).length;
+  const bothN=A.uniq.filter(id=>P.byTree[id]).length;
   document.getElementById("kpis").innerHTML=`
     <div class="kpi"><b>${A.uniq.length}</b><span>名單 1 樹數</span></div>
-    <div class="kpi"><b>${P.trees.length}</b><span>有相片的樹<br>（${P.items.length} 張）</span></div>
-    <div class="kpi"><b>${complete.length}</b><span>四張齊全</span></div>
-    <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
-    <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>
-    <div class="kpi"><b>${P.junk.length}</b><span>系統／垃圾檔</span></div>
+    <div class="kpi"><b>${P.trees.length}</b><span>有相片的樹</span></div>
+    <div class="kpi"><b>${onlyA.length}</b><span>只在名單 1</span></div>
+    <div class="kpi"><b>${onlyP.length}</b><span>只在相片</span></div>
+    <div class="kpi"><b>${bothN}</b><span>兩邊都有</span></div>
+    <div class="kpi"><b>${P.rawN||0}</b><span>貼入檔名行<br>（計入 ${P.items.length}）</span></div>
     <div class="kpi"><b>${jpg}</b><span>JPG</span></div>
-    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>`;
+    <div class="kpi"><b>${heic}</b><span>HEIC／HEIF</span></div>
+    <div class="kpi"><b>${P.junk.length}</b><span>過濾／垃圾</span></div>
+    <div class="kpi"><b>${(P.unknown||[]).length}</b><span>抽唔到樹號</span></div>
+    <div class="kpi"><b>${complete.length}</b><span>四張齊全</span></div>
+    <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>`;
   warnNoUnderscore(P);
   if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
   renderMatrix(checkList, P, {defectMode:false});
   renderDefect(null);
+  renderDiff({onlyA,onlyP,P,A});
   renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown,checkList});
   const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
   const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
@@ -838,6 +849,53 @@ function renderMatrix(checkList, P, opt){
 function box(title,cls,arr){
   return `<div class="card"><h3 class="${cls}">${title}（${arr.length}）</h3><div class="col">${arr.length?arr.join("\n"):"—"}</div></div>`;
 }
+
+function extBreakdownLines(cnt){
+  return Object.keys(cnt||{}).sort((a,b)=>(cnt[b]-cnt[a])||sortId(a,b))
+    .map(e=>e+" ×"+cnt[e]);
+}
+
+function renderDiff(S){
+  const P=S.P, A=S.A;
+  const both = (A.uniq||[]).filter(id=>P.byTree[id]);
+  const extAll = extBreakdownLines(P.extAll);
+  const extKeep = extBreakdownLines(P.extCnt);
+  const junkBy={};
+  (P.junk||[]).forEach(line=>{
+    const m=line.match(/^([^←]+)←/);
+    const k=(m?m[1]:"其他").trim();
+    junkBy[k]=(junkBy[k]||0)+1;
+  });
+  const junkSum=Object.keys(junkBy).sort(sortId).map(k=>k+" ×"+junkBy[k]);
+
+  let html='<div class="grid" style="margin-bottom:12px">';
+  html+=box("名單分別：只在名單 1（無任何相）","miss", S.onlyA||[]);
+  html+=box("名單分別：只在相片（唔喺名單 1）","extra", S.onlyP||[]);
+  html+=box("兩邊都有（有樹號又有相）","ok", both);
+  html+=box("貼入檔名行數／副檔名（全部）","info",
+    ["貼入有效行："+(P.rawN||0),
+     "計入檢查："+(P.items||[]).length,
+     "抽唔到樹號："+(P.unknown||[]).length,
+     "過濾／垃圾："+(P.junk||[]).length,
+     "—— 全部副檔名 ——"].concat(extAll.length?extAll:["—"]));
+  html+=box("計入檢查嘅副檔名","info", extKeep.length?extKeep:["—"]);
+  if((P.junk||[]).length) html+=box("已過濾分類","extra", junkSum.concat(["——"], (P.junk||[]).slice(0,200)));
+  if((P.unknown||[]).length) html+=box("抽唔到樹號嘅檔","extra", P.unknown);
+  html+="</div>";
+  const el=document.getElementById("p-diff");
+  if(el) el.innerHTML=html;
+  else {
+    // inject before p-lists if missing
+    const lists=document.getElementById("p-lists");
+    if(lists){
+      const d=document.createElement("div");
+      d.id="p-diff";
+      d.innerHTML=html;
+      lists.parentNode.insertBefore(d, lists);
+    }
+  }
+}
+
 function renderLists(S){
   const missLines=S.incomplete.map(x=>{
     const bits=[`${x.id}  欠：${x.miss.join("、")}`];
@@ -879,8 +937,8 @@ function renderLists(S){
   html+=box("四張齊全","ok",S.complete.map(x=>x.id));
   html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
   html+=box("同角度多於一張（矩陣橙色數字）","miss",multiLines);
-  html+=box("只在名單 1（完全沒相片）","miss",S.onlyA);
-  html+=box("只在相片名單","extra",S.onlyP);
+  html+=box("只在名單 1（同上「名單分別」）","miss",S.onlyA);
+  html+=box("只在相片名單（同上「名單分別」）","extra",S.onlyP);
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
