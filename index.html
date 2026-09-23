@@ -568,7 +568,8 @@ function defectMatch(a,b){
   const x=normDefect(a), y=normDefect(b);
   if(!x||!y) return false;
   if(x===y) return true;
-  if(x.length>=5 && y.length>=5 && (x.includes(y)||y.includes(x))) return true;
+  // tight alternate only: same after stripping all spaces — no substring/includes
+  if(x.replace(/\s+/g,"")===y.replace(/\s+/g,"")) return true;
   return false;
 }
 function isStdAngleSuffix(suf){
@@ -684,7 +685,7 @@ function renderDefect(D){
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（忽略大小寫／空格／底線）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：忽略大小寫／標點／空格／底線，不做部分字串）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
