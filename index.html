@@ -116,7 +116,7 @@ table.mtx tr:hover td.id{background:#e7f6ea}
       <label>C Excel（樹號 + 缺陷）</label>
       <textarea id="listC" placeholder="TG-T0175&#9;Co-dominant branches&#10;TG-T0176&#9;Wilted crown&#10;T-2225&#9;Leaning"></textarea>
       <div class="drop" id="dropC">拖 Excel 匯出嘅 .txt／.csv 到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" accept=".txt,.csv,text/plain" onchange="filesToBox(event,'listC',false)">選檔</label></div>
-      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。會檢查缺陷文字疑似錯字（例如 inc;uded）。</div>
+      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。A／B／C 都會檢查疑似錯字（樹號格式、角度名、缺陷字，例如 AT-O310、Crwon、inc;uded）。欠相片／有 C 無缺陷相可一鍵複製 TSV。</div>
     </div>
   </div>
   <div class="btns">
@@ -240,15 +240,18 @@ function formatOf(line, id){
   return {key: tail.toUpperCase(), label: tail || "(空)", join, typeFmt};
 }
 function parseTrees(text, slash){
-  const rows=[], cnt={};
+  const rows=[], raws=[], cnt={};
   for(const raw of text.split(/\r?\n/)){
-    const id = extractTreeId(raw, slash);
+    const line=String(raw).trim();
+    if(!line) continue;
+    const id = extractTreeId(line, slash);
     if(!id) continue;
     rows.push(id);
+    raws.push(line);
     cnt[id]=(cnt[id]||0)+1;
   }
   const uniq = Object.keys(cnt).sort(sortId);
-  return {rows, uniq, cnt, dups: uniq.filter(k=>cnt[k]>1)};
+  return {rows, raws, uniq, cnt, dups: uniq.filter(k=>cnt[k]>1)};
 }
 
 function parsePhotos(text, slash, filterJunk){
@@ -741,17 +744,323 @@ function findTyposInText(text){
   }
   return found;
 }
+function normAngleKey(s){
+  return String(s||"").toLowerCase().replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim();
+}
+function suggestNeedFromSuffix(suf){
+  const raw=String(suf||"").trim();
+  if(!raw) return null;
+  const u=raw.toUpperCase().replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim();
+  if(STD_ANGLES.has(u) || NEED.some(n=>n.toUpperCase()===u)) return null;
+  const key=normAngleKey(raw);
+  const keyNoSpace=key.replace(/\s+/g,"");
+  const map={
+    "crwon":"Crown","crowm":"Crown","corwn":"Crown","cown":"Crown","crwn":"Crown","crowwn":"Crown",
+    "tga":"Tag","taq":"Tag","tog":"Tag","tage":"Tag",
+    "whole veiw":"Whole view","whloe view":"Whole view","whole vei":"Whole view","wole view":"Whole view",
+    "wholeveiw":"Whole view","wholveview":"Whole view","whole viwe":"Whole view","hole view":"Whole view",
+    "whole vieww":"Whole view","whoel view":"Whole view",
+    "trunk bse":"Trunk base","trunk bas":"Trunk base","trunck base":"Trunk base","trunk baes":"Trunk base",
+    "truk base":"Trunk base","trnk base":"Trunk base","trunk bass":"Trunk base","trunk bace":"Trunk base"
+  };
+  if(map[key]) return map[key];
+  if(map[keyNoSpace]) return map[keyNoSpace];
+  const lk=lettersKey(raw);
+  const byLetters={
+    crwon:"Crown",crowm:"Crown",corwn:"Crown",cown:"Crown",crwn:"Crown",crowwn:"Crown",
+    tga:"Tag",taq:"Tag",
+    wholeveiw:"Whole view",whloeview:"Whole view",woleview:"Whole view",wholeviwe:"Whole view",whoelview:"Whole view",
+    trunkbse:"Trunk base",trunkbas:"Trunk base",trunckbase:"Trunk base",trukbase:"Trunk base",trnkbase:"Trunk base",trunkbaes:"Trunk base"
+  };
+  if(byLetters[lk]) return byLetters[lk];
+  const hits=[];
+  for(const need of NEED){
+    const nk=lettersKey(need);
+    if(isPluralOnlyDiff(lk, nk)) continue;
+    if(lk.length<3 || nk.length<3) continue;
+    if(Math.abs(lk.length-nk.length)>1) continue;
+    if(editDistance1(lk, nk)===1) hits.push(need);
+  }
+  const uniq=[...new Set(hits)];
+  if(uniq.length===1) return uniq[0];
+  const fixed=key.split(/\s+/).map(w=>{
+    const wl=w.toLowerCase();
+    if(wl==="veiw"||wl==="viwe"||wl==="vei") return "view";
+    if(wl==="whloe"||wl==="whoel"||wl==="wole") return "whole";
+    if(wl==="bse"||wl==="baes"||wl==="bace") return "base";
+    if(wl==="trunck"||wl==="truk"||wl==="trnk") return "trunk";
+    if(wl==="crwon"||wl==="crowm"||wl==="corwn") return "crown";
+    if(wl==="tga"||wl==="taq") return "tag";
+    return w;
+  }).join(" ");
+  const fu=fixed.toUpperCase();
+  for(const need of NEED){
+    if(need.toUpperCase()===fu) return need;
+  }
+  if(STD_ANGLES.has(fu)){
+    if(fu==="TAG") return "Tag";
+    if(fu==="WHOLE VIEW"||fu==="WHOLEVIEW"||fu==="WHOLE") return "Whole view";
+    if(fu==="TRUNK BASE"||fu==="TRUNKBASE") return "Trunk base";
+    if(fu==="CROWN") return "Crown";
+  }
+  return null;
+}
+
+function treeIdPrefix(id){
+  return String(id||"").replace(/[0-9O]+$/i,"").replace(/[-_\/]+$/,"");
+}
+
+/** Conservative tree-ID format issues. Returns [{suggestion, reason, word}]. */
+function findTreeIdIssues(rawLine, slash, majorityPrefix){
+  const raw=String(rawLine||"").trim();
+  if(!raw) return [];
+  let idPart=raw;
+  if(/\t/.test(raw)) idPart=raw.split("\t")[0].trim();
+  else if(/,/.test(raw) && !/[\\/]/.test(raw)) idPart=raw.split(",")[0].trim();
+  const id=extractTreeId(idPart, slash);
+  if(!id || !isPlausibleTreeId(id)) return [];
+  const out=[];
+  const push=(suggestion, reason, word)=>{
+    out.push({word:word||idPart, suggestion:suggestion||"", reason:reason||""});
+  };
+
+  if(/--|__|\/\//.test(idPart) || /--|__|\/\//.test(id)){
+    const sug=id.replace(/--+/g,"-").replace(/__+/g,"_").replace(/\/\/+/g,"/");
+    push(sug, "重複分隔符", idPart);
+  }
+
+  if(/\s/.test(idPart) && /^[A-Za-z0-9\/\-_\s]+$/.test(idPart)){
+    const noSpace=idPart.replace(/\s+/g,"");
+    if(/^[A-Za-z0-9\/\-_]+$/.test(noSpace) && /\d/.test(noSpace) && idPart.length<=20){
+      push(extractTreeId(noSpace, slash)||noSpace.toUpperCase(), "編號內有空格", idPart);
+    }
+  }
+
+  if(/[.;:`´',!]/.test(idPart)){
+    const cleaned=idPart.replace(/[.;:`´',!]+/g,"");
+    const sug=extractTreeId(cleaned, slash)||cleaned.toUpperCase();
+    push(sug, "編號內有標點", idPart);
+  }
+
+  // Letter O in numeric segment (O vs 0)
+  const segs=id.split(/(-)/);
+  let changed=false;
+  const fixedSegs=segs.map(seg=>{
+    if(seg==="-") return seg;
+    if(/\d/.test(seg) && /O/i.test(seg)){
+      changed=true;
+      return seg.replace(/O/gi,"0");
+    }
+    if(/^O+[0-9O]*\d[0-9O]*$/i.test(seg) || /^\d[0-9O]*O[0-9O]*$/i.test(seg) || /^O+\d/i.test(seg)){
+      changed=true;
+      return seg.replace(/O/gi,"0");
+    }
+    return seg;
+  });
+  if(changed){
+    const sug=fixedSegs.join("");
+    if(sug!==id) push(sug, "數字位有字母 O", id);
+  } else if(/O\d|\dO/.test(id)){
+    const m=id.match(/^(.*-)([^\-]*)$/);
+    if(m && /O/i.test(m[2]) && /\d/.test(m[2])){
+      push(m[1]+m[2].replace(/O/gi,"0"), "數字位有字母 O", id);
+    }
+  }
+
+  if(majorityPrefix && majorityPrefix.length>=1){
+    const pref=treeIdPrefix(id);
+    if(pref && pref!==majorityPrefix){
+      const a=pref.toUpperCase(), b=majorityPrefix.toUpperCase();
+      if(!isPluralOnlyDiff(a,b) && editDistance1(a,b)===1 && Math.abs(a.length-b.length)<=1){
+        const escRe=pref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const sug=id.replace(new RegExp("^"+escRe, "i"), majorityPrefix);
+        push(sug, "前綴同多數差 1（多數: "+majorityPrefix+"）", id);
+      }
+    }
+  }
+  return out;
+}
+
+function majorityTreePrefix(ids){
+  const cnt={};
+  for(const id of ids||[]){
+    const p=treeIdPrefix(id);
+    if(!p) continue;
+    cnt[p]=(cnt[p]||0)+1;
+  }
+  let best="", n=0, total=0;
+  Object.keys(cnt).forEach(k=>{ total+=cnt[k]; if(cnt[k]>n){ n=cnt[k]; best=k; } });
+  if(n>=3 && n/Math.max(total,1)>=0.5) return best;
+  if(n>=5) return best;
+  return "";
+}
+
+function pushTypo(bag, seen, rec){
+  const k=[rec.side||"", rec.id||"", (rec.word||"").toLowerCase(), (rec.suggestion||"").toLowerCase(), (rec.text||"").toLowerCase(), rec.reason||""].join("\0");
+  if(seen.has(k)) return;
+  seen.add(k);
+  bag.push(rec);
+}
+
 function collectTypoHits(id, side, text, bag, seen){
   const t=String(text||"").trim();
   if(!t) return;
   const hits=findTyposInText(t);
   for(const h of hits){
-    const k=(id||"")+"\0"+side+"\0"+(h.word||"").toLowerCase()+"\0"+(h.suggestion||"").toLowerCase();
-    if(seen.has(k)) continue;
-    seen.add(k);
-    bag.push({id:id||"", side, text:t, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
+    pushTypo(bag, seen, {id:id||"", side, text:t, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
   }
 }
+
+/** Scan A tree IDs, B photo suffixes, C Excel ids+defects. Used in both modes. */
+function collectAllTypos(A, P, excel, slash){
+  const typos=[], seen=new Set();
+  const idPool=[...(A.uniq||[])];
+  (excel||[]).forEach(r=>{ if(r&&r.id) idPool.push(r.id); });
+  (P.trees||[]).forEach(id=>idPool.push(id));
+  const maj=majorityTreePrefix(idPool);
+
+  const raws=(A && A.raws && A.raws.length) ? A.raws : (A && A.rows ? A.rows : []);
+  raws.forEach(raw=>{
+    const issues=findTreeIdIssues(raw, slash, maj);
+    const id=extractTreeId(String(raw).trim(), slash)||"";
+    issues.forEach(h=>{
+      pushTypo(typos, seen, {id, side:"A", text:String(raw).trim(), word:h.word||String(raw).trim(), suggestion:h.suggestion||"", reason:h.reason||""});
+    });
+  });
+
+  (P.items||[]).forEach(it=>{
+    const fn=it.line||"";
+    const id=it.id||"";
+    const suf=photoSuffix(fn, id);
+    if(!suf) return;
+    const ang=suggestNeedFromSuffix(suf);
+    if(ang){
+      pushTypo(typos, seen, {id, side:"B", text:fn, word:suf, suggestion:ang, reason:"角度名疑似錯字", isAngle:true});
+      return;
+    }
+    findTyposInText(suf).forEach(h=>{
+      pushTypo(typos, seen, {id, side:"B", text:fn, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
+    });
+  });
+
+  (excel||[]).forEach(r=>{
+    if(!r) return;
+    const id=r.id||"";
+    const raw=r.raw||"";
+    if(id){
+      findTreeIdIssues(id, slash, maj).forEach(h=>{
+        pushTypo(typos, seen, {id, side:"C", text:id, word:h.word||id, suggestion:h.suggestion||"", reason:h.reason||""});
+      });
+    } else if(raw){
+      findTreeIdIssues(raw, slash, maj).forEach(h=>{
+        pushTypo(typos, seen, {id:"", side:"C", text:raw, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
+      });
+    }
+    const excelText=r.defect||"";
+    if(excelText){
+      collectTypoHits(id, "C", excelText, typos, seen);
+      splitDefectParts(excelText).forEach(part=>collectTypoHits(id, "C", part, typos, seen));
+    }
+  });
+
+  return typos;
+}
+
+function typoDisplayLine(t){
+  const side=(t.side||"").toUpperCase();
+  if(side==="A"){
+    let s="A | "+(t.word||t.text||t.id||"");
+    if(t.suggestion) s+=" | 建議: "+t.suggestion;
+    if(t.reason) s+=" | 原因: "+t.reason;
+    return s;
+  }
+  if(side==="B"){
+    if(t.isAngle){
+      let s="B | "+(t.text||"");
+      if(t.suggestion) s+=" | 建議: "+t.suggestion;
+      return s;
+    }
+    let s="B | "+(t.text||"");
+    if(t.word) s+=" | "+t.word;
+    if(t.suggestion) s+=" | 建議: "+t.suggestion;
+    if(t.reason) s+=" | 原因: "+t.reason;
+    return s;
+  }
+  let s="C | "+(t.id||"");
+  if(t.word && t.word!==t.id) s+=" | "+t.word;
+  else if(t.text && t.text!==t.id && !t.word) s+=" | "+t.text;
+  if(t.suggestion) s+=" | 建議: "+t.suggestion;
+  const idReason=t.reason && /^(數字|前綴|重複|編號)/.test(t.reason);
+  if(idReason) s+=" | 原因: "+t.reason;
+  else if(t.reason && !t.word) s+=" | 原因: "+t.reason;
+  return s;
+}
+
+function rowsToTSV(rows){
+  return (rows||[]).map(r=>r.map(c=>String(c).replace(/\t/g," ").replace(/\r?\n/g," ")).join("\t")).join("\n");
+}
+function copyToClipboard(text, n){
+  const msg="已複製 "+n+" 行";
+  const fallback=()=>{
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text;
+      ta.setAttribute("readonly","");
+      ta.style.position="fixed"; ta.style.left="-9999px";
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0, ta.value.length);
+      const ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      if(ok){ alert(msg); return; }
+    }catch(e){}
+    prompt("複製以下內容", text);
+  };
+  if(navigator.clipboard && typeof navigator.clipboard.writeText==="function"){
+    navigator.clipboard.writeText(text).then(()=>alert(msg), fallback);
+  } else fallback();
+}
+function buildMissingPhotoTSV(){
+  if(!last) run();
+  const rows=[["樹號","欠乜"]];
+  (last.incomplete||[]).forEach(x=>rows.push([x.id, (x.miss||[]).join("、")]));
+  return rows;
+}
+function buildOnlyATSV(){
+  if(!last) run();
+  const rows=[["樹號","欠乜"]];
+  (last.onlyA||[]).forEach(id=>rows.push([id, NEED.join("、")]));
+  return rows;
+}
+function buildNoDefectPhotoTSV(){
+  if(!last) run();
+  const rows=[["樹號","C 缺陷"]];
+  ((last.defect&&last.defect.noPhoto)||[]).forEach(o=>rows.push([o.id||"", o.excel||""]));
+  return rows;
+}
+function buildMismatchTSV(){
+  if(!last) run();
+  const rows=[["樹號","C 缺陷","B_後"]];
+  ((last.defect&&last.defect.mismatch)||[]).forEach(o=>{
+    const ph=(o.suffixes||(o.photos||[]).map(p=>p.suf||p)).filter(Boolean).join(" | ");
+    rows.push([o.id||"", o.excel||"", ph]);
+  });
+  return rows;
+}
+function buildTyposTSV(){
+  if(!last) run();
+  const rows=[["堆","樹號","內容","建議","原因"]];
+  (last.typos||[]).forEach(t=>{
+    rows.push([t.side||"", t.id||"", t.word||t.text||"", t.suggestion||"", t.reason||""]);
+  });
+  return rows;
+}
+function copyMissingPhotos(){ const rows=buildMissingPhotoTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyOnlyA(){ const rows=buildOnlyATSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyNoDefectPhoto(){ const rows=buildNoDefectPhotoTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyMismatch(){ const rows=buildMismatchTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyTypos(){ const rows=buildTyposTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+
+
 
 function photoSuffix(line, id){
   const raw=stripExt(line);
@@ -874,21 +1183,15 @@ function renderDefect(D){
     const ph=(o.suffixes||(o.photos||[]).map(p=>p.suf||p)).filter(Boolean).join(" | ")||"—";
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
-  const typoLine=t=>{
-    let s=`${t.id}  |  ${t.side}: ${t.text}`;
-    if(t.suggestion) s+=`  |  建議: ${t.suggestion}`;
-    if(t.reason) s+=`  |  原因: ${t.reason}`;
-    return s;
-  };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。會檢查缺陷文字疑似錯字（例如 inc;uded）。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
-  html+=box("唔啱（C 有字但同 B 唔同）","miss", D.mismatch.map(line));
-  html+=box("疑似錯字","warn", (D.typos||[]).map(typoLine));
+  html+=box("唔啱（C 有字但同 B 唔同）","miss", D.mismatch.map(line), "copyMismatch()");
+  html+=box("疑似錯字","warn", (D.typos||[]).map(typoDisplayLine), "copyTypos()");
   html+=box("C 空白／無缺陷字（有樹號／有相）","miss", (D.blankExcel||[]).map(line));
-  html+=box("有 C 無缺陷相","miss", D.noPhoto.map(line));
+  html+=box("有 C 無缺陷相","miss", D.noPhoto.map(line), "copyNoDefectPhoto()");
   html+=box("有缺陷相無 C","extra", D.noExcel.map(line));
   html+=`</div>`;
   if(D.extras && D.extras.length) html+=box("其他未配對缺陷相","info", D.extras.map(x=>`${x.id}  |  ${x.suf}  |  ${x.fn}`));
@@ -918,11 +1221,7 @@ function dlDefect(){
 }
 function copyDefect(){
   const rows=defectRows();
-  const tsv=rows.map(r=>r.map(c=>String(c).replace(/\t/g," ").replace(/\r?\n/g," ")).join("\t")).join("\n");
-  navigator.clipboard.writeText(tsv).then(
-    ()=>alert("已複製缺陷對比 "+(rows.length-1)+" 行，可貼去 Excel"),
-    ()=>prompt("複製以下內容", tsv)
-  );
+  copyToClipboard(rowsToTSV(rows), Math.max(0, rows.length-1));
 }
 
 
@@ -969,10 +1268,12 @@ function run(){
       mtxList = checkList.slice();
     }
     P.trees.forEach(id=>{ if(!mtxList.includes(id)) mtxList.push(id); });
-    last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,complete:[],incomplete:[],showUnknown,showFmt};
+    const typos=collectAllTypos(A, P, excel, slash);
+    defect.typos=typos;
+    last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,typos,complete:[],incomplete:[],showUnknown,showFmt};
     const noU=(P.noUnderscore||[]).length;
     const blankN=(defect.blankExcel||[]).length;
-    const typoN=(defect.typos||[]).length;
+    const typoN=typos.length;
     document.getElementById("kpis").innerHTML=`
       <div class="kpi"><b>${excel.length}</b><span>C 行</span></div>
       <div class="kpi"><b>${P.items.length}</b><span>B 相片</span></div>
@@ -988,7 +1289,7 @@ function run(){
     renderMatrix(mtxList, P, {defectMode:true, excel});
     renderDefect(defect);
     renderDiff({onlyA,onlyP,P,A});
-    renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown,checkList:mtxList});
+    renderLists({complete:[],incomplete:[],onlyA,onlyP,P,A,showUnknown,checkList:mtxList,typos});
     // keep rename/fmt quiet unless asked
     const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
     const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
@@ -1007,7 +1308,8 @@ function run(){
     else if(!miss.length) complete.push({id,have,extras:rec.extras,files:rec.files,byNeed:rec.byNeed});
     else incomplete.push({id,miss,have,extras:rec.extras||[],files:rec.files,byNeed:rec.byNeed});
   }
-  last={mode:"four", A,P,excel,complete,incomplete,onlyA,onlyP,checkList,showUnknown,showFmt,defect:null};
+  const typos=collectAllTypos(A, P, excel, slash);
+  last={mode:"four", A,P,excel,complete,incomplete,onlyA,onlyP,checkList,showUnknown,showFmt,defect:null,typos};
   const noU=(P.noUnderscore||[]).length;
   document.getElementById("kpis").innerHTML=`
     <div class="kpi"><b>${A.uniq.length}</b><span>A 樹數</span></div>
@@ -1015,13 +1317,14 @@ function run(){
     <div class="kpi"><b>${onlyA.length}</b><span>只在 A</span></div>
     <div class="kpi"><b>${onlyP.length}</b><span>只在 B（相片）</span></div>
     <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
+    <div class="kpi"><b>${typos.length}</b><span>疑似錯字</span></div>
     <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>`;
   warnNoUnderscore(P);
   if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
   renderMatrix(checkList, P, {defectMode:false});
   renderDefect(null);
   renderDiff({onlyA,onlyP,P,A});
-  renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown,checkList});
+  renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown,checkList,typos});
   const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
   const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
 }
@@ -1067,8 +1370,10 @@ function renderMatrix(checkList, P, opt){
   document.getElementById("p-matrix").innerHTML=html;
 }
 
-function box(title,cls,arr){
-  return `<div class="card"><h3 class="${cls}">${title}（${arr.length}）</h3><div class="col">${arr.length?arr.join("\n"):"—"}</div></div>`;
+function box(title,cls,arr,copyOnclick){
+  const n=(arr||[]).length;
+  const btn=(copyOnclick && n)?` <button type="button" class="btn-lite" style="margin-left:8px;vertical-align:middle" onclick="${copyOnclick}">複製</button>`:"";
+  return `<div class="card"><h3 class="${cls}">${title}（${n}）${btn}</h3><div class="col">${n?arr.join("\n"):"—"}</div></div>`;
 }
 
 function extBreakdownLines(cnt){
@@ -1078,7 +1383,7 @@ function extBreakdownLines(cnt){
 
 function renderDiff(S){
   let html='<div class="grid" style="margin-bottom:12px">';
-  html+=box("只在 A（無任何相）","miss", S.onlyA||[]);
+  html+=box("只在 A（無任何相）","miss", S.onlyA||[], "copyOnlyA()");
   html+=box("只在 B（相片，唔喺 A）","extra", S.onlyP||[]);
   html+="</div>";
   const el=document.getElementById("p-diff");
@@ -1127,8 +1432,12 @@ function renderLists(S){
   });
 
   let html='<div class="grid">';
-  html+=box("欠相片（樹號 + 欠哪張）","miss",missLines);
+  html+=box("欠相片（樹號 + 欠哪張）","miss",missLines, "copyMissingPhotos()");
   html+=box("同角度多於一張（矩陣橙色數字）","miss",multiLines);
+  html+="</div>";
+  const typoLines=(S.typos||[]).map(typoDisplayLine);
+  html+='<div class="grid" style="margin-top:12px">';
+  html+=box("疑似錯字","warn", typoLines, "copyTypos()");
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
@@ -1236,7 +1545,7 @@ function shortText(){
 }
 function copyShort(){
   const t=shortText();
-  navigator.clipboard.writeText(t).then(()=>alert("已複製欠相短訊"),()=>{ prompt("複製以下內容",t); });
+  copyToClipboard(t, String(t).split(/\n/).length);
 }
 function download(name, text){
   const a=document.createElement("a");
@@ -1298,11 +1607,7 @@ function dlExcelPhotos(){
 }
 function copyExcelPhotos(){
   const rows=photoExcelRows();
-  const tsv=rows.map(r=>r.map(c=>String(c).replace(/\t/g," ").replace(/\r?\n/g," ")).join("\t")).join("\n");
-  navigator.clipboard.writeText(tsv).then(
-    ()=>alert("已複製 "+(rows.length-1)+" 行到剪貼簿，可直接 Ctrl+V 貼去 Excel"),
-    ()=>{ prompt("複製以下內容貼去 Excel", tsv); }
-  );
+  copyToClipboard(rowsToTSV(rows), Math.max(0, rows.length-1));
 }
 
 function swap(){
