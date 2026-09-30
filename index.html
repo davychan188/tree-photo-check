@@ -116,7 +116,7 @@ table.mtx tr:hover td.id{background:#e7f6ea}
       <label>C Excel（樹號 + 缺陷）</label>
       <textarea id="listC" placeholder="TG-T0175&#9;Co-dominant branches&#10;TG-T0176&#9;Wilted crown&#10;T-2225&#9;Leaning"></textarea>
       <div class="drop" id="dropC">拖 Excel 匯出嘅 .txt／.csv 到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" accept=".txt,.csv,text/plain" onchange="filesToBox(event,'listC',false)">選檔</label></div>
-      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。A／B／C 都會檢查疑似錯字（樹號格式、角度名、缺陷字，例如 AT-O310、Crwon、inc;uded）。欠相片／有 C 無缺陷相可一鍵複製 TSV。</div>
+      <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。A／B／C 都會檢查疑似錯字（樹號格式、角度名、缺陷字，例如 AT-O310、Crwon、inc;uded）。相片檔名第一個 <code>_</code> 後面若再提到樹號，而編號方法（補零位數、分隔符、數字位字母 O）同樹號唔同，會當疑似錯字標出；只係大小寫唔同、或格式一樣但棵樹唔喺名單，唔會因為呢項標。欠相片／有 C 無缺陷相可一鍵複製 TSV。</div>
     </div>
   </div>
   <div class="btns">
@@ -1039,7 +1039,123 @@ function collectTypoHits(id, side, text, bag, seen){
   }
 }
 
-/** Scan A tree IDs, B photo suffixes, C Excel ids+defects. Used in both modes. */
+/** Tree-id shape: prefix (letters, hyphen only between letter groups), separator, numeric tail.
+ *  Letter O inside the numeric tail counts as a digit (AT-O025). */
+function parseStyledId(token){
+  const s=String(token||"").trim();
+  if(!s) return null;
+  const m=s.match(/^([A-Za-z]+(?:-(?=[A-NP-Za-np-z]|O(?![0-9O]))[A-Za-z]+)*)([ ]+|[_-])?([0-9O]*[0-9][0-9O]*)$/);
+  if(!m) return null;
+  const numNorm=m[3].replace(/O/gi,"0");
+  return {raw:s, prefix:m[1], sep:m[2]||"", numRaw:m[3], numNorm:numNorm, width:numNorm.length};
+}
+
+/** Defect / angle words are not tree-id prefixes. Segments longer than 4 letters are words, not codes. */
+const MENTION_PREFIX_STOP = new Set([
+  "tag","base","view","whole","crown","trunk","cross","with","near","from","for","and","the",
+  "dominant","wilted","wilting","decay","decaying","split","included","leaning","branch","branches",
+  "photo","image","img","dsc","pxl","copy","final","left","right","top","side","area","tree"
+]);
+function mentionPrefixOk(prefix){
+  const parts=String(prefix||"").split("-");
+  if(!parts.length || parts.some(part=>!part)) return false;
+  for(const part of parts){
+    if(part.length>4) return false;
+    if(MENTION_PREFIX_STOP.has(part.toLowerCase())) return false;
+  }
+  return true;
+}
+
+/** Most common prefix / separator / digit-width. Tie: longer prefix, separator - _ glued space, wider digits. */
+function dominantIdStyle(ids){
+  const prefs={}, seps={}, widths={};
+  let n=0;
+  (ids||[]).forEach(id=>{
+    const st=parseStyledId(id);
+    if(!st) return;
+    n++;
+    const pk=st.prefix.toUpperCase();
+    if(!prefs[pk]) prefs[pk]={n:0, sample:st.prefix};
+    prefs[pk].n++;
+    if(st.prefix===pk) prefs[pk].sample=st.prefix;
+    seps[st.sep]=(seps[st.sep]||0)+1;
+    widths[String(st.width)]=(widths[String(st.width)]||0)+1;
+  });
+  if(!n) return null;
+  let bestP="", bestPn=-1;
+  Object.keys(prefs).forEach(k=>{
+    const c=prefs[k].n;
+    const longer=bestP && prefs[k].sample.length>prefs[bestP].sample.length;
+    const sameLen=bestP && prefs[k].sample.length===prefs[bestP].sample.length && k<bestP;
+    if(c>bestPn || (c===bestPn && (longer || sameLen))){ bestPn=c; bestP=k; }
+  });
+  const sepRank={"-":3,"_":2,"":1," ":0};
+  let bestS="", bestSn=-1, haveS=false;
+  Object.keys(seps).forEach(k=>{
+    const c=seps[k];
+    const rank=(Object.prototype.hasOwnProperty.call(sepRank,k)?sepRank[k]:-1);
+    const bestRank=haveS?(Object.prototype.hasOwnProperty.call(sepRank,bestS)?sepRank[bestS]:-1):-1;
+    if(!haveS || c>bestSn || (c===bestSn && rank>bestRank)){ bestSn=c; bestS=k; haveS=true; }
+  });
+  let bestW=-1, bestWn=-1;
+  Object.keys(widths).forEach(k=>{
+    const c=widths[k], wn=Number(k);
+    if(c>bestWn || (c===bestWn && wn>bestW)){ bestWn=c; bestW=wn; }
+  });
+  return {prefix:prefs[bestP].sample, sep:bestS, width:bestW, n:n};
+}
+
+/** Pile A ids when present; otherwise each photo's own leading tree id. */
+function styleSourceIds(A, P){
+  if(A && A.uniq && A.uniq.length) return A.uniq.slice();
+  const ids=[];
+  ((P && P.items)||[]).forEach(it=>{ if(it && it.id) ids.push(it.id); });
+  return ids;
+}
+
+function suggestMentionForm(parsed, dom){
+  const samePrefix=parsed.prefix.toUpperCase()===String(dom.prefix||"").toUpperCase();
+  const prefix=samePrefix ? dom.prefix : parsed.prefix.toUpperCase();
+  const value=parsed.numNorm.replace(/^0+/,"") || "0";
+  const width=dom.width>0 ? dom.width : parsed.width;
+  const digits=value.length>width ? value : value.padStart(width,"0");
+  return prefix+(dom.sep||"")+digits;
+}
+
+/** Later tree-id mentions (after the first _) whose numbering method differs from the batch. */
+function findMentionStyleIssues(filename, dom){
+  if(!dom) return [];
+  const base=stripExt(filename);
+  const cut=base.indexOf("_");
+  if(cut<0) return [];
+  const rest=base.slice(cut+1);
+  const re=/([A-Za-z]+(?:-(?=[A-NP-Za-np-z]|O(?![0-9O]))[A-Za-z]+)*)([ ]+|[_-])?([0-9O]*[0-9][0-9O]*)/g;
+  const out=[];
+  const seen=new Set();
+  let m;
+  while((m=re.exec(rest))){
+    const start=m.index;
+    const raw=m[0];
+    const end=start+raw.length;
+    if(start>0 && /[A-Za-z0-9]/.test(rest.charAt(start-1))) continue;
+    if(end<rest.length && /[A-Za-z0-9]/.test(rest.charAt(end))) continue;
+    const parsed=parseStyledId(raw);
+    if(!parsed || !mentionPrefixOk(parsed.prefix)) continue;
+    if(parsed.numRaw.length<2) continue;
+    const hasO=/O/i.test(parsed.numRaw);
+    const formattingDiff=hasO || parsed.sep!==dom.sep || parsed.width!==dom.width;
+    if(!formattingDiff) continue;
+    const suggestion=suggestMentionForm(parsed, dom);
+    const showSug=(suggestion && suggestion.toUpperCase()!==raw.toUpperCase()) ? suggestion : "";
+    const k=raw.toLowerCase()+"\0"+showSug;
+    if(seen.has(k)) continue;
+    seen.add(k);
+    out.push({word:raw, suggestion:showSug, reason:""});
+  }
+  return out;
+}
+
+/** Scan A tree IDs, B photo suffixes, C Excel ids+defects, and B filename tree-id mentions. Used in both modes. */
 function collectAllTypos(A, P, excel, slash){
   const typos=[], seen=new Set();
   const idPool=[...(A.uniq||[])];
@@ -1056,17 +1172,22 @@ function collectAllTypos(A, P, excel, slash){
     });
   });
 
+  const domStyle=dominantIdStyle(styleSourceIds(A, P));
   (P.items||[]).forEach(it=>{
     const fn=it.line||"";
     const id=it.id||"";
     const suf=photoSuffix(fn, id);
-    if(!suf) return;
-    const ang=suggestNeedFromSuffix(suf);
-    if(ang){
-      pushTypo(typos, seen, {id, side:"B", text:fn, word:suf, suggestion:ang, reason:"角度名疑似錯字", isAngle:true});
-      return;
+    if(suf){
+      const ang=suggestNeedFromSuffix(suf);
+      if(ang){
+        pushTypo(typos, seen, {id, side:"B", text:fn, word:suf, suggestion:ang, reason:"角度名疑似錯字", isAngle:true});
+      }else{
+        findTyposInText(suf).forEach(h=>{
+          pushTypo(typos, seen, {id, side:"B", text:fn, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
+        });
+      }
     }
-    findTyposInText(suf).forEach(h=>{
+    findMentionStyleIssues(fn, domStyle).forEach(h=>{
       pushTypo(typos, seen, {id, side:"B", text:fn, word:h.word, suggestion:h.suggestion||"", reason:h.reason||""});
     });
   });
