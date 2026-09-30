@@ -605,13 +605,16 @@ const DEFECT_TYPO_MAP = {
   "incuded":"included","incluuded":"included","includd":"included",
   "inc;uded":"included","inc:uded":"included","inclded":"included","inlcuded":"included",
   "leaninig":"leaning","leanng":"leaning","leanin":"leaning","leaing":"leaning",
-  "wiltted":"wilted","wiltedd":"wilted","wilteddd":"wilted","wiltled":"wilted",
+  "wiltted":"wilted","wiltedd":"wilted","wilteddd":"wilted","wiltled":"wilted","witled":"wilted",
   "coodominant":"co-dominant","codominent":"co-dominant","codominat":"co-dominant",
   "codominanat":"co-dominant","co-dominent":"co-dominant","codominant":"co-dominant",
+  "domiannt":"dominant","co-domiannt":"co-dominant","codomiannt":"co-dominant",
   "sparce":"sparse","sparcee":"sparse","sparsse":"sparse",
   "folage":"foliage","foilage":"foliage","foliagee":"foliage","foiliage":"foliage",
   "brachnes":"branches","brances":"branches","braches":"branches","branchs":"branches",
-  "decy":"decay","deacy":"decay","deccay":"decay",
+  "decy":"decay","deacy":"decay","deccay":"decay","deacying":"decaying",
+  "supressed":"suppressed","suppresed":"suppressed",
+  "splitted":"split","splited":"split",
   "trnk":"trunk","trunck":"trunk","truk":"trunk",
   "crowm":"crown","cown":"crown",
   "barkk":"bark","barck":"bark",
@@ -620,36 +623,132 @@ const DEFECT_TYPO_MAP = {
   "dehydratd":"dehydrated","dehydated":"dehydrated","dehyrdated":"dehydrated",
   "mulitple":"multiple","mutiple":"multiple","multipel":"multiple",
   "broekn":"broken","borken":"broken","breoken":"broken",
-  "woond":"wound","woud":"wound","wund":"wound"
+  "woond":"wound","woud":"wound","wund":"wound",
+  "epicormics":"epicormic"
 };
 
-/** Common defect tokens (incl. plurals) — used by edit-distance suggestion. */
+/** Common defect tokens (incl. plurals) — used by edit-distance suggestion.
+ *  Seed lemmas so typos are caught even when the correct spelling is absent from the batch.
+ *  Accepted plurals are listed explicitly; unlisted plurals of technical terms may be flagged. */
 const DEFECT_ALLOWLIST = new Set([
-  "leaning","leanings","wilted","crown","crowns","trunk","trunks","decay","wound","wounds",
+  "leaning","leanings","wilted","crown","crowns","trunk","trunks","decay","decaying","wound","wounds",
   "sparse","foliage","included","bark","codominant","co-dominant","dominant","dominants",
   "branches","branch","fungal","fruiting","body","bodies","dehydrated","dead","wood",
   "multiple","broken","cavity","cavities","crack","cracks","split","splits","deadwood",
   "epicormic","girdling","root","roots","soil","canopy","dieback","hanging","crossing",
-  "includedbark","codominanttrunks","codominantbranches","with","and","on","of","the","a","an"
+  "suppressed","bending","crooked","asymmetric","imbalanced","includedbark",
+  "codominanttrunks","codominantbranches","with","and","on","of","the","a","an"
 ].map(s=>s.toLowerCase()));
 
+/** Damerau-Levenshtein distance capped: returns 0, 1, or 2 meaning ">1". Includes adjacent transposition. */
 function editDistance1(a,b){
   a=String(a); b=String(b);
   if(a===b) return 0;
   const la=a.length, lb=b.length;
   if(Math.abs(la-lb)>1) return 2;
   if(la>lb) return editDistance1(b,a);
-  // la <= lb; la==lb or la+1==lb
+  if(la===lb){
+    const diffs=[];
+    for(let i=0;i<la;i++) if(a[i]!==b[i]) diffs.push(i);
+    if(diffs.length===0) return 0;
+    if(diffs.length===1) return 1;
+    if(diffs.length===2 && diffs[1]===diffs[0]+1 && a[diffs[0]]===b[diffs[1]] && a[diffs[1]]===b[diffs[0]]) return 1;
+    return 2;
+  }
+  // la+1===lb: one insertion in b (or deletion in a)
   let i=0,j=0,edits=0;
   while(i<la && j<lb){
     if(a[i]===b[j]){ i++; j++; continue; }
     edits++;
     if(edits>1) return 2;
-    if(la===lb){ i++; j++; }
-    else j++; // insertion in b
+    j++;
   }
   if(j<lb || i<la) edits++;
   return edits;
+}
+/** Full Damerau-Levenshtein with early exit above maxDist (default 2). */
+function damerauLevenshtein(a,b,maxDist){
+  a=String(a); b=String(b);
+  if(maxDist==null) maxDist=2;
+  if(a===b) return 0;
+  const la=a.length, lb=b.length;
+  if(Math.abs(la-lb)>maxDist) return maxDist+1;
+  let prevPrev=new Array(lb+1);
+  let prev=new Array(lb+1);
+  let cur=new Array(lb+1);
+  for(let j=0;j<=lb;j++) prev[j]=j;
+  for(let i=1;i<=la;i++){
+    cur[0]=i;
+    let rowMin=cur[0];
+    for(let j=1;j<=lb;j++){
+      const cost=a[i-1]===b[j-1]?0:1;
+      let v=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+      if(i>1 && j>1 && a[i-1]===b[j-2] && a[i-2]===b[j-1]){
+        v=Math.min(v, (prevPrev[j-2]==null?i:prevPrev[j-2])+1);
+      }
+      cur[j]=v;
+      if(v<rowMin) rowMin=v;
+    }
+    if(rowMin>maxDist) return maxDist+1;
+    prevPrev=prev;
+    prev=cur;
+    cur=new Array(lb+1);
+  }
+  return prev[lb];
+}
+/** True if DL==2 and an adjacent transposition or doubled-letter edit is involved. */
+function isDist2SwapOrDouble(a,b){
+  a=String(a); b=String(b);
+  if(damerauLevenshtein(a,b,2)!==2) return false;
+  const trySwap=(s, other)=>{
+    for(let i=0;i<s.length-1;i++){
+      if(s[i]===s[i+1]) continue;
+      const sw=s.slice(0,i)+s[i+1]+s[i]+s.slice(i+2);
+      if(damerauLevenshtein(sw, other,1)===1) return true;
+    }
+    return false;
+  };
+  if(trySwap(a,b) || trySwap(b,a)) return true;
+  const tryUndouble=(s, other)=>{
+    for(let i=0;i<s.length-1;i++){
+      if(s[i]!==s[i+1]) continue;
+      const u=s.slice(0,i)+s.slice(i+1);
+      if(damerauLevenshtein(u, other,1)===1) return true;
+    }
+    return false;
+  };
+  return tryUndouble(a,b) || tryUndouble(b,a);
+}
+/** Fake past participle: doubled consonant + ed → undoubled base in allowlist (splitted→split). */
+function fakeDoubleConsonantEd(tok){
+  const low=String(tok||"").toLowerCase();
+  const m=low.match(/^([a-z]*([b-df-hj-np-tv-z]))\2ed$/);
+  if(!m) return null;
+  const base=m[1];
+  if(base.length>=3 && allowlistHasToken(base)) return base;
+  return null;
+}
+function matchTokenCase(sample, replacement){
+  const s=String(sample||""), r=String(replacement||"");
+  if(!s || !r) return r;
+  if(s===s.toUpperCase()) return r.toUpperCase();
+  if(s[0]===s[0].toUpperCase() && s.slice(1)===s.slice(1).toLowerCase()){
+    return r.charAt(0).toUpperCase()+r.slice(1);
+  }
+  if(s[0]===s[0].toUpperCase()) return r.charAt(0).toUpperCase()+r.slice(1);
+  return r;
+}
+/** Prefer hyphenated / canonical allowlist spelling for a letters-key. */
+function canonicalAllowlistForm(letters){
+  const k=lettersKey(letters);
+  if(k==="codominant" && DEFECT_ALLOWLIST.has("co-dominant")) return "co-dominant";
+  for(const w of DEFECT_ALLOWLIST){
+    if(lettersKey(w)===k && w.includes("-")) return w;
+  }
+  for(const w of DEFECT_ALLOWLIST){
+    if(lettersKey(w)===k) return w;
+  }
+  return letters;
 }
 function isPluralOnlyDiff(a,b){
   const x=String(a).toLowerCase(), y=String(b).toLowerCase();
@@ -711,38 +810,67 @@ function findTyposInText(text){
       if(DEFECT_TYPO_MAP[low]) suggestion=DEFECT_TYPO_MAP[low];
       else if(DEFECT_TYPO_MAP[removed.toLowerCase()]) suggestion=DEFECT_TYPO_MAP[removed.toLowerCase()];
       else if(asL && DEFECT_TYPO_MAP[asL.toLowerCase()]) suggestion=DEFECT_TYPO_MAP[asL.toLowerCase()];
-      push(tok, suggestion, "字中間有 "+bad);
+      push(tok, matchTokenCase(tok, suggestion), "字中間有 "+bad);
       continue;
     }
     // 2) Known misspellings map
     if(DEFECT_TYPO_MAP[low]){
-      push(tok, DEFECT_TYPO_MAP[low], "常見錯字");
+      push(tok, matchTokenCase(tok, DEFECT_TYPO_MAP[low]), "常見錯字");
       continue;
     }
-    // 3) Edit-distance 1 to exactly one allowlist term (not plural-only)
     const key=lettersKey(tok);
     if(key.length<4) continue;
+    // Exact allowlist (or accepted plural listed in allowlist) → skip
     if(allowlistHasToken(tok) || allowlistHasToken(key)) continue;
-    const hits=[];
+    // 2b) Irregular fake past participle: splitted → split
+    const fakeEd=fakeDoubleConsonantEd(tok);
+    if(fakeEd){
+      push(tok, matchTokenCase(tok, fakeEd), "疑似錯字");
+      continue;
+    }
+    // 3) Damerau-Levenshtein distance 1 (sub/ins/del/adjacent transposition)
+    //    Do not skip plural-only here: accepted plurals are already in the allowlist;
+    //    unlisted plurals of technical terms (e.g. Epicormics) should be flagged.
+    const hits1=[];
     for(const w of DEFECT_ALLOWLIST){
       const wk=lettersKey(w);
       if(wk.length<3) continue;
-      if(isPluralOnlyDiff(key, wk)) continue;
-      if(editDistance1(key, wk)===1) hits.push(w);
+      if(Math.abs(key.length-wk.length)>1) continue;
+      if(editDistance1(key, wk)===1) hits1.push(w);
     }
-    // unique by lettersKey
-    const uniq=[];
-    const uk=new Set();
-    for(const h of hits){
-      const k=lettersKey(h);
-      if(uk.has(k)) continue;
-      uk.add(k); uniq.push(h);
-    }
+    let uniq=uniqueByLetters(hits1);
     if(uniq.length===1){
-      push(tok, uniq[0], "接近常用詞");
+      const sug=canonicalAllowlistForm(uniq[0]);
+      push(tok, matchTokenCase(tok, sug), "接近常用詞");
+      continue;
+    }
+    // 4) Distance 2 only when swap or doubled/extra letter involved; min length 6
+    if(key.length<6) continue;
+    const hits2=[];
+    for(const w of DEFECT_ALLOWLIST){
+      const wk=lettersKey(w);
+      if(wk.length<4) continue;
+      if(Math.abs(key.length-wk.length)>2) continue;
+      if(isPluralOnlyDiff(key, wk)) continue;
+      if(!isDist2SwapOrDouble(key, wk)) continue;
+      hits2.push(w);
+    }
+    uniq=uniqueByLetters(hits2);
+    if(uniq.length===1){
+      const sug=canonicalAllowlistForm(uniq[0]);
+      push(tok, matchTokenCase(tok, sug), "接近常用詞");
     }
   }
   return found;
+}
+function uniqueByLetters(hits){
+  const uniq=[], uk=new Set();
+  for(const h of hits){
+    const k=lettersKey(h);
+    if(uk.has(k)) continue;
+    uk.add(k); uniq.push(h);
+  }
+  return uniq;
 }
 function normAngleKey(s){
   return String(s||"").toLowerCase().replace(/[_\/\-]+/g," ").replace(/\s+/g," ").trim();
