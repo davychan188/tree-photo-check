@@ -80,12 +80,13 @@ table.mtx tr:hover td.id{background:#e7f6ea}
 <body>
 <header>
   <h1>樹木相片／缺陷對比</h1>
-  <p>A＝樹編號、B＝相片、C＝Excel 缺陷。檢查可揀 1↔2（A↔B 矩陣）或 2↔3（B↔C 缺陷對比）。</p>
+  <p>A＝樹編號、B＝相片、C＝Excel 缺陷。檢查可揀 1↔2（A↔B 矩陣）、2↔3（B↔C 缺陷對比），或兩個資料夾檔名對比。</p>
 </header>
 <div class="wrap">
   <div class="opts">
     <label><input type="radio" name="mode" id="mode12" checked/> 檢查 1↔2（樹號 ↔ 相片矩陣）</label>
     <label><input type="radio" name="mode" id="mode23"/> 檢查 2↔3（相片 ↔ Excel 缺陷）</label>
+    <label><input type="radio" name="mode" id="modeFF"/> 兩個資料夾檔名對比</label>
     <label><input type="checkbox" id="slashHSW"/> 把 H/SW 當成 HSW</label>
     <label><input type="checkbox" id="onlyFromA" checked/> 1↔2 時只睇 A 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
@@ -93,7 +94,7 @@ table.mtx tr:hover td.id{background:#e7f6ea}
     <label><input type="checkbox" id="showUnknown" checked/> 顯示過濾掉／抽唔到樹號的檔</label>
     <label><input type="checkbox" id="showFmt"/> 顯示數字後格式差異</label>
   </div>
-  <div class="grid grid3">
+  <div id="abcInputs" class="grid grid3">
     <div class="card">
       <label>A 樹編號</label>
       <textarea id="listA" placeholder="T28&#10;T30&#10;TY-A0001"></textarea>
@@ -119,6 +120,28 @@ table.mtx tr:hover td.id{background:#e7f6ea}
       <div class="hint">每行「樹號 + 缺陷」（Tab／逗號／空格分隔），例如 <code>TG-T0175&#9;Co-dominant branches</code>。會用樹號對相片，再比 <code>_</code> 後文字；唔使 Tag／Crown 等四張。A／B／C 都會檢查疑似錯字（樹號格式、角度名、缺陷字，例如 AT-O310、Crwon、inc;uded）。相片檔名第一個 <code>_</code> 後面若再提到樹號，而編號方法（補零位數、分隔符、數字位字母 O）同樹號唔同，會當疑似錯字標出；只係大小寫唔同、或格式一樣但棵樹唔喺名單，唔會因為呢項標。欠相片／有 C 無缺陷相可一鍵複製 TSV。</div>
     </div>
   </div>
+  <div id="ffInputs" class="grid" style="display:none">
+    <div class="card">
+      <label>資料夾1 相片檔名</label>
+      <textarea id="listF1" placeholder="AT-0001_Tag.jpg&#10;&quot;R:\Photos\AT-0001_Crown.jpg&quot;"></textarea>
+      <div class="drop drop-big" id="dropF1">
+        <button type="button" class="btn-folder" onclick="pickPhotoFolderTo('listF1','folderPickF1')">選資料夾（只讀檔名）</button>
+        <label class="btn-lite">選檔／.txt<input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listF1',true)"></label>
+        <input id="folderPickF1" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listF1',true)">
+      </div>
+      <div class="hint">可貼檔名、Explorer「複製為路徑」、拖資料夾；只比檔名（唔使樹號／缺陷）</div>
+    </div>
+    <div class="card">
+      <label>資料夾2 相片檔名</label>
+      <textarea id="listF2" placeholder="AT-0001_Tag.jpg&#10;AT-0002_Whole view.jpg"></textarea>
+      <div class="drop drop-big" id="dropF2">
+        <button type="button" class="btn-folder" onclick="pickPhotoFolderTo('listF2','folderPickF2')">選資料夾（只讀檔名）</button>
+        <label class="btn-lite">選檔／.txt<input type="file" multiple accept="image/*,.txt" onchange="filesToBox(event,'listF2',true)"></label>
+        <input id="folderPickF2" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listF2',true)">
+      </div>
+      <div class="hint">同資料夾1一樣：貼檔名／揀資料夾／拖放。對比兩邊有冇相同檔名</div>
+    </div>
+  </div>
   <div class="btns">
     <button class="btn" onclick="run()">檢查</button>
     <button class="btn btn2" onclick="clearAll()">清空</button>
@@ -128,11 +151,13 @@ table.mtx tr:hover td.id{background:#e7f6ea}
   <div class="tabs">
     <button class="tab on" data-p="matrix" onclick="tab(this)">矩陣</button>
     <button class="tab" data-p="defect" onclick="tab(this)">2↔3 結果</button>
+    <button class="tab" data-p="folders" onclick="tab(this)">資料夾對比</button>
     <button class="tab" data-p="lists" onclick="tab(this)">清單</button>
   </div>
   <div id="p-matrix" class="panel on"></div>
   <div id="p-lists" class="panel"></div>
   <div id="p-defect" class="panel"></div>
+  <div id="p-folders" class="panel"></div>
   <div id="p-rename" class="panel"></div>
   <div id="p-fmt" class="panel"></div>
 </div>
@@ -390,7 +415,7 @@ function tab(btn){
   document.getElementById("p-"+btn.dataset.p).classList.add("on");
 }
 
-async function pickPhotoFolder(){
+async function pickPhotoFolderTo(taId, fallbackInputId){
   // Prefer Chrome File System Access: enumerate names only, no file bytes.
   if(window.showDirectoryPicker){
     try{
@@ -404,7 +429,7 @@ async function pickPhotoFolder(){
       }
       await walk(dir, 0);
       if(!names.length){ alert("資料夾內找不到檔案"); return; }
-      const ta=document.getElementById("listB");
+      const ta=document.getElementById(taId);
       const extra=names.filter(Boolean).join("\n");
       ta.value = ta.value.trim() ? ta.value.trim()+"\n"+extra : extra;
       alert("已讀取 "+names.length+" 個檔名（未上載相片）");
@@ -414,8 +439,10 @@ async function pickPhotoFolder(){
       // fall through to input picker
     }
   }
-  document.getElementById("folderPick").click();
+  const fb=document.getElementById(fallbackInputId||"folderPick");
+  if(fb) fb.click();
 }
+async function pickPhotoFolder(){ return pickPhotoFolderTo("listB","folderPick"); }
 function dlListNamesBat(){
   const s = `@echo off\r
 chcp 65001>nul\r
@@ -469,10 +496,11 @@ function ingestFiles(files, id, photos){
   ta.value = ta.value.trim() ? ta.value.trim()+"\n"+extra : extra;
 }
 
-["dropA","dropB","dropC"].forEach(did=>{
+const DROP_MAP={dropA:["listA",false],dropB:["listB",true],dropC:["listC",false],dropF1:["listF1",true],dropF2:["listF2",true]};
+Object.keys(DROP_MAP).forEach(did=>{
   const el=document.getElementById(did);
-  const photos = did==="dropB";
-  const box = did==="dropB"?"listB":(did==="dropC"?"listC":"listA");
+  if(!el) return;
+  const [box, photos]=DROP_MAP[did];
   el.addEventListener("dragover", e=>{e.preventDefault(); el.classList.add("over");});
   el.addEventListener("dragleave", ()=>el.classList.remove("over"));
   el.addEventListener("drop", e=>{
@@ -497,6 +525,18 @@ function uniqueInOrder(arr){
 
 function isDefectMode(){ return !!(document.getElementById("mode23")||{}).checked; }
 function isMatrixMode(){ return !!(document.getElementById("mode12")||{}).checked; }
+function isFolderMode(){ return !!(document.getElementById("modeFF")||{}).checked; }
+function syncModeUI(){
+  const ff=isFolderMode();
+  const abc=document.getElementById("abcInputs");
+  const ffi=document.getElementById("ffInputs");
+  if(abc) abc.style.display=ff?"none":"";
+  if(ffi) ffi.style.display=ff?"":"none";
+}
+document.querySelectorAll('input[name="mode"]').forEach(el=>{
+  el.addEventListener("change", syncModeUI);
+});
+syncModeUI();
 
 function parseExcelLines(text, slash){
   const rows=[];
@@ -1309,6 +1349,84 @@ function copyNoDefectPhoto(){ const rows=buildNoDefectPhotoTSV(); copyToClipboar
 function copyMismatch(){ const rows=buildMismatchTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 function copyTypos(){ const rows=buildTyposTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 
+/** Basename-only photo list for two-folder compare. Match key = uppercase full basename (so .JPG ≡ .jpg). */
+function parseFilenameList(text, filterJunk){
+  const order=[], map=new Map(), junk=[];
+  let rawN=0;
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const parsed=normalizeInputLine(raw);
+    if(!parsed) continue;
+    rawN++;
+    const line=parsed.name;
+    const why=isJunk(line);
+    if(why){
+      junk.push(why+" ← "+(parsed.hasDir?parsed.src:line));
+      if(filterJunk) continue;
+    }
+    const key=line.toUpperCase();
+    if(map.has(key)) continue;
+    map.set(key, line);
+    order.push(key);
+  }
+  return {order, map, junk, rawN, names:order.map(k=>map.get(k))};
+}
+function compareFolderNames(F1, F2){
+  const both=[], only1=[], only2=[];
+  const set2=new Set(F2.order);
+  F1.order.forEach(k=>{
+    if(set2.has(k)) both.push(F1.map.get(k));
+    else only1.push(F1.map.get(k));
+  });
+  const set1=new Set(F1.order);
+  F2.order.forEach(k=>{
+    if(!set1.has(k)) only2.push(F2.map.get(k));
+  });
+  return {both, only1, only2, F1, F2};
+}
+function buildBothFoldersTSV(){
+  if(!last||last.mode!=="folders") run();
+  const rows=[["檔名"]];
+  ((last.folders&&last.folders.both)||[]).forEach(n=>rows.push([n]));
+  return rows;
+}
+function buildOnlyF1TSV(){
+  if(!last||last.mode!=="folders") run();
+  const rows=[["檔名"]];
+  ((last.folders&&last.folders.only1)||[]).forEach(n=>rows.push([n]));
+  return rows;
+}
+function buildOnlyF2TSV(){
+  if(!last||last.mode!=="folders") run();
+  const rows=[["檔名"]];
+  ((last.folders&&last.folders.only2)||[]).forEach(n=>rows.push([n]));
+  return rows;
+}
+function copyBothFolders(){ const rows=buildBothFoldersTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyOnlyF1(){ const rows=buildOnlyF1TSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function copyOnlyF2(){ const rows=buildOnlyF2TSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function renderFolders(S){
+  const el=document.getElementById("p-folders");
+  if(!el) return;
+  if(!S){
+    el.innerHTML='<div class="card"><h3 class="info">兩個資料夾檔名對比</h3><div class="col">請揀「兩個資料夾檔名對比」再撳檢查。</div></div>';
+    return;
+  }
+  let html='<div class="card"><h3 class="info">兩個資料夾檔名對比</h3>';
+  html+='<p class="hint">只比檔名（去掉路徑）；大小寫同副檔名大小寫唔計（.JPG 同 .jpg 一樣）。顯示用原本寫法。非圖片／系統檔會跟「過濾系統檔／重複副檔名」過濾。</p></div>';
+  html+='<div class="grid" style="margin-top:12px">';
+  html+=box("兩邊都有","ok", S.both||[], "copyBothFolders()");
+  html+=box("只喺資料夾1","miss", S.only1||[], "copyOnlyF1()");
+  html+="</div>";
+  html+='<div class="grid" style="margin-top:12px">';
+  html+=box("只喺資料夾2","extra", S.only2||[], "copyOnlyF2()");
+  if((S.F1&&S.F1.junk&&S.F1.junk.length)||(S.F2&&S.F2.junk&&S.F2.junk.length)){
+    const junk=[].concat((S.F1&&S.F1.junk)||[], (S.F2&&S.F2.junk)||[]);
+    html+=box("過濾掉／非圖片","warn", junk);
+  }
+  html+="</div>";
+  el.innerHTML=html;
+}
+
 
 
 function photoSuffix(line, id){
@@ -1499,6 +1617,31 @@ function run(){
   const showUnknown=document.getElementById("showUnknown").checked;
   const showFmt=document.getElementById("showFmt").checked;
   const skipStd=document.getElementById("skipStdAngles").checked;
+
+  if(isFolderMode()){
+    const F1=parseFilenameList((document.getElementById("listF1")||{}).value||"", filterJunk);
+    const F2=parseFilenameList((document.getElementById("listF2")||{}).value||"", filterJunk);
+    const folders=compareFolderNames(F1, F2);
+    last={mode:"folders", folders, F1, F2, A:null, P:null, excel:[], complete:[], incomplete:[], onlyA:[], onlyP:[], typos:[], defect:null, showUnknown, showFmt};
+    document.getElementById("kpis").innerHTML=`
+      <div class="kpi"><b>${F1.names.length}</b><span>資料夾1</span></div>
+      <div class="kpi"><b>${F2.names.length}</b><span>資料夾2</span></div>
+      <div class="kpi"><b>${folders.both.length}</b><span>兩邊都有</span></div>
+      <div class="kpi"><b>${folders.only1.length}</b><span>只喺資料夾1</span></div>
+      <div class="kpi"><b>${folders.only2.length}</b><span>只喺資料夾2</span></div>`;
+    const w=document.getElementById("warnNoUnderscore"); if(w){ w.style.display="none"; w.innerHTML=""; }
+    document.getElementById("p-matrix").innerHTML="";
+    document.getElementById("p-lists").innerHTML="";
+    document.getElementById("p-defect").innerHTML="";
+    const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
+    const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
+    const pd=document.getElementById("p-diff"); if(pd) pd.innerHTML="";
+    renderFolders(folders);
+    const ffTab=document.querySelector('.tab[data-p="folders"]');
+    if(ffTab) tab(ffTab);
+    return;
+  }
+
   const A=parseTrees(document.getElementById("listA").value, slash);
   const P=parsePhotos(document.getElementById("listB").value, slash, filterJunk);
   const excel=parseExcelLines(document.getElementById("listC").value, slash);
@@ -1542,6 +1685,7 @@ function run(){
     // keep rename/fmt quiet unless asked
     const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
     const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
+    renderFolders(null);
     // Auto-open 2↔3 results tab so KPIs + lists are visible
     const defectTab=document.querySelector('.tab[data-p="defect"]');
     if(defectTab) tab(defectTab);
@@ -1576,6 +1720,7 @@ function run(){
   renderLists({complete,incomplete,onlyA,onlyP,P,A,showUnknown,checkList,typos});
   const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
   const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
+  renderFolders(null);
 }
 
 
@@ -1867,9 +2012,11 @@ function clearAll(){
   document.getElementById("listA").value="";
   document.getElementById("listB").value="";
   const c=document.getElementById("listC"); if(c) c.value="";
+  const f1=document.getElementById("listF1"); if(f1) f1.value="";
+  const f2=document.getElementById("listF2"); if(f2) f2.value="";
   document.getElementById("kpis").innerHTML="";
   const w=document.getElementById("warnNoUnderscore"); if(w){ w.style.display="none"; w.innerHTML=""; }
-  ["p-matrix","p-lists","p-defect","p-rename","p-fmt"].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
+  ["p-matrix","p-lists","p-defect","p-folders","p-rename","p-fmt","p-diff"].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=""; });
   last=null;
 }
 </script>
