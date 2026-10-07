@@ -58,7 +58,8 @@ table.mtx tr:hover td{background:#f0fdf4}
 table.mtx tr:hover td.id{background:#e7f6ea}
 /* Cell status colors — specificity beats even-row / hover so highlights stay visible */
 table.mtx td.cell-ok,table.mtx tr:nth-child(even) td.cell-ok,table.mtx tr:hover td.cell-ok{background:#dcfce7;color:#166534;font-weight:700}
-table.mtx td.cell-no,table.mtx tr:nth-child(even) td.cell-no,table.mtx tr:hover td.cell-no{background:#e8f5e9;color:#3f6b4f;font-weight:700}
+table.mtx td.cell-no,table.mtx tr:nth-child(even) td.cell-no,table.mtx tr:hover td.cell-no{background:#ffe0b2;color:#e65100;font-weight:700}
+table.mtx td.id.id-miss,table.mtx tr:nth-child(even) td.id.id-miss,table.mtx tr:hover td.id.id-miss{background:#ffe0b2;color:#e65100}
 table.mtx td.cell-more,table.mtx tr:nth-child(even) td.cell-more,table.mtx tr:hover td.cell-more{background:#ffedd5;color:#9a3412}
 table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hover td.cell-oth{background:#e0e7ff;color:#1e3a8a}
 .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
@@ -1743,9 +1744,11 @@ function renderMatrix(checkList, P, opt){
   html+="</tr></thead><tbody>";
   checkList.forEach(id=>{
     const rec=P.byTree[id];
-    html+=`<tr><td class="id">${esc(id)}</td>`;
-    NEED.forEach(t=>{
-      const n=rec&&rec.byNeed[t]?rec.byNeed[t].length:(rec&&rec.typeCnt[t]?rec.typeCnt[t]:0);
+    const needCounts=NEED.map(t=>rec&&rec.byNeed[t]?rec.byNeed[t].length:(rec&&rec.typeCnt[t]?rec.typeCnt[t]:0));
+    const hasMiss=needCounts.some(n=>n===0);
+    html+=`<tr><td class="id${hasMiss?' id-miss':''}">${esc(id)}</td>`;
+    NEED.forEach((t,i)=>{
+      const n=needCounts[i];
       if(n===1) html+=`<td class="cell-ok">✓</td>`;
       else if(n>1) html+=`<td class="cell-more" title="多於一張（例如 (1)(2)）">${n}</td>`;
       else html+=`<td class="cell-no">—</td>`;
