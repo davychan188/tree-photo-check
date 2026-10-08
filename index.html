@@ -448,8 +448,8 @@ async function pickPhotoFolder(){ return pickPhotoFolderTo("listB","folderPick")
 function dlListNamesBat(){
   const s = `@echo off\r
 chcp 65001>nul\r
-REM ========== 改下一行做你嘅相片資料夾完整路徑 ==========\r
-set "FOLDER=C:\\Users\\你的帳號\\Desktop\\photos"\r
+REM ========== 預設已設工程盤 Photo；要換資料夾就改下一行 ==========\r
+set "FOLDER=\\\\SERVER05\\ShareArb\\Arboriculture Team\\Works\\TTE\\工程盤\\Gammon Richwell JV ND202503 San Tan Technopole_C3\\Photo"\r
 REM ======================================================\r
 if not exist "%FOLDER%\\" (\r
   echo 找不到資料夾：%FOLDER%\r
