@@ -820,6 +820,11 @@ function knownWord(s){
   }
   return false;
 }
+/** Multi-word defect phrase typos (checked before per-token scan). Do not put bare "within"→"with" here — "Within construction site" is valid. */
+const DEFECT_PHRASE_TYPO_MAP = [
+  {re:/\bwithin\s+included\s+bark\b/gi, suggestion:"with included bark", reason:"常見錯字"}
+];
+
 /** Find suspected typos in one defect string. Returns [{word, suggestion, reason}]. */
 function findTyposInText(text){
   const s=String(text||"");
@@ -832,6 +837,14 @@ function findTyposInText(text){
     seen.add(k);
     found.push({word, suggestion, reason});
   };
+  // Phrase-level typos first (e.g. within included bark → with included bark)
+  for(const entry of DEFECT_PHRASE_TYPO_MAP){
+    const re=new RegExp(entry.re.source, entry.re.flags);
+    let m;
+    while((m=re.exec(s))){
+      push(m[0], entry.suggestion, entry.reason||"常見錯字");
+    }
+  }
   // tokens: keep mid-word ;:`'´ and hyphens
   const tokens=s.match(/[A-Za-z][A-Za-z;:`'´\-]*/g)||[];
   for(const tok of tokens){
