@@ -82,13 +82,14 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
 <body>
 <header>
   <h1>樹木相片／缺陷對比</h1>
-  <p>A＝樹編號、B＝相片、C＝Excel 缺陷。檢查可揀 1↔2（A↔B 矩陣）、2↔3（B↔C 缺陷對比），或兩個資料夾檔名對比。</p>
+  <p>A＝樹編號、B＝相片、C＝Excel 缺陷。檢查可揀 1↔2、2↔3、兩個資料夾檔名對比，或 3張 F1-01/02/03。</p>
 </header>
 <div class="wrap">
   <div class="opts">
     <label><input type="radio" name="mode" id="mode12" checked/> 檢查 1↔2（樹號 ↔ 相片矩陣）</label>
     <label><input type="radio" name="mode" id="mode23"/> 檢查 2↔3（相片 ↔ Excel 缺陷）</label>
     <label><input type="radio" name="mode" id="modeFF"/> 兩個資料夾檔名對比</label>
+    <label><input type="radio" name="mode" id="modeF3"/> 3張 F1-01/02/03</label>
     <label><input type="checkbox" id="slashHSW"/> 把 H/SW 當成 HSW</label>
     <label><input type="checkbox" id="onlyFromA" checked/> 1↔2 時只睇 A 內的樹</label>
     <label><input type="checkbox" id="filterJunk" checked/> 過濾系統檔／重複副檔名</label>
@@ -115,7 +116,7 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
       <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。2↔3：C 貼「樹號 + 缺陷」，B 用 TG-T0175_Co-dominant branches 呢類對比（略過 Tag／Crown 等）。</div>
       <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾</div>
     </div>
-    <div class="card">
+    <div class="card" id="cardC">
       <label>C Excel（樹號 + 缺陷）</label>
       <textarea id="listC" placeholder="TG-T0175&#9;Co-dominant branches&#10;TG-T0176&#9;Wilted crown&#10;T-2225&#9;Leaning"></textarea>
       <div class="drop" id="dropC">拖 Excel 匯出嘅 .txt／.csv 到此，或 <label style="display:inline;font-weight:700;cursor:pointer;color:#14532d"><input type="file" accept=".txt,.csv,text/plain" onchange="filesToBox(event,'listC',false)">選檔</label></div>
@@ -528,12 +529,20 @@ function uniqueInOrder(arr){
 function isDefectMode(){ return !!(document.getElementById("mode23")||{}).checked; }
 function isMatrixMode(){ return !!(document.getElementById("mode12")||{}).checked; }
 function isFolderMode(){ return !!(document.getElementById("modeFF")||{}).checked; }
+function isF3Mode(){ return !!(document.getElementById("modeF3")||{}).checked; }
 function syncModeUI(){
   const ff=isFolderMode();
   const abc=document.getElementById("abcInputs");
   const ffi=document.getElementById("ffInputs");
   if(abc) abc.style.display=ff?"none":"";
   if(ffi) ffi.style.display=ff?"":"none";
+  const cCard=document.getElementById("cardC");
+  if(cCard) cCard.style.display=isF3Mode()?"none":"";
+  const grid=document.getElementById("abcInputs");
+  if(grid && !ff){
+    if(isF3Mode()) grid.classList.remove("grid3");
+    else grid.classList.add("grid3");
+  }
 }
 document.querySelectorAll('input[name="mode"]').forEach(el=>{
   el.addEventListener("change", syncModeUI);
@@ -1331,8 +1340,9 @@ function buildMissingPhotoTSV(){
 }
 function buildOnlyATSV(){
   if(!last) run();
+  const missWhat=(last.mode==="f3" && last.shotCols && last.shotCols.length)?last.shotCols.join("、"):NEED.join("、");
   const rows=[["樹號","欠乜"]];
-  (last.onlyA||[]).forEach(id=>rows.push([id, NEED.join("、")]));
+  (last.onlyA||[]).forEach(id=>rows.push([id, missWhat]));
   return rows;
 }
 function buildNoDefectPhotoTSV(){
@@ -1625,6 +1635,193 @@ function warnNoUnderscore(P){
   return list.length;
 }
 
+
+const F3_NAME_RE = /^(.*?)-F(\d+)-(\d+)$/i;
+
+function parseF3Name(basenameNoExt){
+  const s=String(basenameNoExt||"").trim();
+  if(!s) return null;
+  const m=s.match(F3_NAME_RE);
+  if(!m) return null;
+  return {
+    idRaw:m[1],
+    id:String(m[1]).trim().toUpperCase(),
+    fRaw:m[2],
+    fNum:String(parseInt(m[2],10)),
+    shotRaw:m[3],
+    shotNum:String(parseInt(m[3],10))
+  };
+}
+
+function dominantF3Pad(shotRaws){
+  let pad2=0, pad1=0;
+  (shotRaws||[]).forEach(r=>{
+    const s=String(r||"");
+    if(s.length>=2) pad2++; else pad1++;
+  });
+  return pad2>=pad1 ? 2 : 1;
+}
+
+function f3ShotLabel(fNum, shotNum, padLen){
+  const f="F"+String(parseInt(fNum,10));
+  const shot=String(parseInt(shotNum,10)).padStart(padLen||2,"0");
+  return f+"-"+shot;
+}
+
+function parseF3Photos(text, filterJunk){
+  const items=[], badFormat=[], junk=[], unknown=[];
+  const byTree={}, fileCnt={}, extCnt={}, extAll={};
+  const shotRaws=[], fNumsSeen=new Set();
+  let rawN=0;
+  for(const raw of String(text||"").split(/\r?\n/)){
+    const parsed=normalizeInputLine(raw);
+    if(!parsed) continue;
+    rawN++;
+    const line=parsed.name;
+    const src=parsed.src;
+    const ext0=extOf(line)||"(無)";
+    extAll[ext0]=(extAll[ext0]||0)+1;
+    const why=isJunk(line);
+    if(why){
+      junk.push(why+" ← "+(parsed.hasDir?src:line));
+      if(filterJunk) continue;
+    }
+    const ext=ext0;
+    extCnt[ext]=(extCnt[ext]||0)+1;
+    const key=line.toUpperCase();
+    fileCnt[key]=fileCnt[key]||{n:0,sample:line};
+    fileCnt[key].n++;
+    const base=stripExt(line);
+    const parsedF=parseF3Name(base);
+    if(!parsedF){
+      badFormat.push(parsed.hasDir?src:line);
+      continue;
+    }
+    if(!isPlausibleTreeId(parsedF.id)){
+      junk.push("非樹號 ← "+(parsed.hasDir?src:line));
+      continue;
+    }
+    shotRaws.push(parsedF.shotRaw);
+    fNumsSeen.add(parsedF.fNum);
+    const it={id:parsedF.id, fNum:parsedF.fNum, shotNum:parsedF.shotNum, shotRaw:parsedF.shotRaw, fRaw:parsedF.fRaw, line, src, hasDir:parsed.hasDir, ext};
+    items.push(it);
+    if(!byTree[parsedF.id]) byTree[parsedF.id]={files:[], byShot:{}, shotCnt:{}};
+    byTree[parsedF.id].files.push(line);
+  }
+  const padLen=dominantF3Pad(shotRaws);
+  const fGroups=[...fNumsSeen].sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+  if(!fGroups.length) fGroups.push("1");
+  const shotCols=[];
+  fGroups.forEach(f=>{
+    ["1","2","3"].forEach(s=>shotCols.push(f3ShotLabel(f,s,padLen)));
+  });
+  items.forEach(it=>{
+    const label=f3ShotLabel(it.fNum, it.shotNum, padLen);
+    it.shotKey=label;
+    const rec=byTree[it.id];
+    rec.byShot[label]=rec.byShot[label]||[];
+    rec.byShot[label].push(it.line);
+    rec.shotCnt[label]=(rec.shotCnt[label]||0)+1;
+  });
+  const sameFile=Object.keys(fileCnt).filter(k=>fileCnt[k].n>1).sort(sortId)
+    .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
+  return {
+    items, byTree, badFormat, junk, unknown, extCnt, extAll, rawN,
+    trees:Object.keys(byTree).sort(sortId),
+    shotCols, padLen, fGroups, sameFile, noUnderscore:[]
+  };
+}
+
+function collectF3Typos(A, P, slash){
+  const typos=[], seen=new Set();
+  const idPool=[...(A.uniq||[]), ...(P.trees||[])];
+  const maj=majorityTreePrefix(idPool);
+  const raws=(A && A.raws && A.raws.length) ? A.raws : (A && A.rows ? A.rows : []);
+  raws.forEach(raw=>{
+    const issues=findTreeIdIssues(raw, slash, maj);
+    const id=extractTreeId(String(raw).trim(), slash)||"";
+    issues.forEach(h=>{
+      pushTypo(typos, seen, {id, side:"A", text:String(raw).trim(), word:h.word||String(raw).trim(), suggestion:h.suggestion||"", reason:h.reason||""});
+    });
+  });
+  (P.items||[]).forEach(it=>{
+    const id=it.id||"";
+    findTreeIdIssues(id, slash, maj).forEach(h=>{
+      pushTypo(typos, seen, {id, side:"B", text:it.line||id, word:h.word||id, suggestion:h.suggestion||"", reason:h.reason||""});
+    });
+    // Suggest dominant zero-pad if this shot raw differs in width from padLen
+    if(it.shotRaw && String(it.shotRaw).length !== (P.padLen||2) && (P.padLen||2)===2 && String(it.shotRaw).length===1){
+      const sug=it.id+"-F"+it.fNum+"-"+String(it.shotNum).padStart(2,"0")+(extOf(it.line)||".jpg");
+      pushTypo(typos, seen, {id, side:"B", text:it.line, word:"F"+it.fNum+"-"+it.shotRaw, suggestion:sug, reason:"鏡號建議補零（多數用 01/02/03）"});
+    }
+  });
+  return typos;
+}
+
+function renderF3Matrix(checkList, P, shotCols){
+  const cols=shotCols&&shotCols.length?shotCols:["F1-01","F1-02","F1-03"];
+  const heads=["樹號",...cols];
+  let html='<div class="card"><h3 class="info">3張矩陣（✓ 有　— 欠　數字 = 同鏡號張數）</h3><div class="mtxwrap"><table class="mtx"><thead><tr>';
+  heads.forEach(h=>html+=`<th>${esc(h)}</th>`);
+  html+="</tr></thead><tbody>";
+  checkList.forEach(id=>{
+    const rec=P.byTree[id];
+    const counts=cols.map(c=>rec&&rec.shotCnt[c]?rec.shotCnt[c]:0);
+    const hasMiss=counts.some(n=>n===0);
+    html+=`<tr><td class="id${hasMiss?' id-miss':''}">${esc(id)}</td>`;
+    cols.forEach((c,i)=>{
+      const n=counts[i];
+      if(n===1) html+=`<td class="cell-ok">✓</td>`;
+      else if(n>1) html+=`<td class="cell-more" title="同鏡號多於一張">${n}</td>`;
+      else html+=`<td class="cell-no">—</td>`;
+    });
+    html+="</tr>";
+  });
+  html+="</tbody></table></div><div class='hint'>橙色 —／樹號 = 欠該鏡號。橙色數字 = 同鏡號多於一張。檔名格式：<code>LGY-T0009-F1-01.jpg</code></div></div>";
+  document.getElementById("p-matrix").innerHTML=html;
+}
+
+function renderF3Lists(S){
+  const missLines=(S.incomplete||[]).map(x=>{
+    const bits=[`${x.id}  欠：${(x.miss||[]).join("、")}`];
+    if(x.have&&x.have.length) bits.push("    已有："+x.have.join("、"));
+    return bits.join("\n");
+  });
+  const multiLines=[];
+  (S.checkList||[]).forEach(id=>{
+    const rec=S.P.byTree[id];
+    if(!rec) return;
+    const bits=[];
+    (S.shotCols||[]).forEach(c=>{
+      const n=rec.shotCnt[c]||0;
+      if(n>1){
+        bits.push("  "+c+" ×"+n);
+        (rec.byShot[c]||[]).forEach(fn=>bits.push("    ← "+fn));
+      }
+    });
+    if(bits.length) multiLines.push(id+"\n"+bits.join("\n"));
+  });
+  const typoLines=(S.typos||[]).map(typoDisplayLine);
+  let html='<div class="grid">';
+  html+=box("欠相片（樹號 + 欠哪張）","miss",missLines, "copyMissingPhotos()");
+  html+=box("同鏡號多於一張","miss",multiLines);
+  html+="</div>";
+  html+='<div class="grid" style="margin-top:12px">';
+  html+=box("只在 A（無任何相）","miss", S.onlyA||[], "copyOnlyA()");
+  html+=box("只在 B（相片，唔喺 A）","extra", S.onlyP||[]);
+  html+="</div>";
+  html+='<div class="grid" style="margin-top:12px">';
+  html+=box("疑似錯字","warn", typoLines, "copyTypos()");
+  html+=box("格式唔啱（非 TREEID-F#-##）","extra", S.badFormat||[]);
+  html+="</div>";
+  if(S.showUnknown){
+    html+='<div class="grid" style="margin-top:12px">';
+    html+=box("過濾檔","extra", (S.P.junk||[]));
+    html+="</div>";
+  }
+  document.getElementById("p-lists").innerHTML=html;
+}
+
 function run(){
   const slash=document.getElementById("slashHSW").checked;
   const onlyFromA=document.getElementById("onlyFromA").checked;
@@ -1654,6 +1851,45 @@ function run(){
     renderFolders(folders);
     const ffTab=document.querySelector('.tab[data-p="folders"]');
     if(ffTab) tab(ffTab);
+    return;
+  }
+
+  if(isF3Mode()){
+    const A=parseTrees(document.getElementById("listA").value, slash);
+    const P=parseF3Photos(document.getElementById("listB").value, filterJunk);
+    const setA=new Set(A.uniq), setP=new Set(P.trees);
+    const checkList=onlyFromA?uniqueInOrder(A.rows&&A.rows.length?A.rows:A.uniq):Array.from(new Set([...uniqueInOrder(A.rows&&A.rows.length?A.rows:A.uniq),...P.trees])).sort(sortId);
+    const onlyA=A.uniq.filter(x=>!setP.has(x));
+    const onlyP=P.trees.filter(x=>!setA.has(x));
+    const shotCols=P.shotCols&&P.shotCols.length?P.shotCols:["F1-01","F1-02","F1-03"];
+    const complete=[], incomplete=[];
+    for(const id of checkList){
+      const rec=P.byTree[id];
+      const have=shotCols.filter(c=>rec&&rec.shotCnt[c]);
+      const miss=shotCols.filter(c=>!(rec&&rec.shotCnt[c]));
+      if(!rec || miss.length) incomplete.push({id, miss, have, files:rec?rec.files:[], byShot:rec?rec.byShot:{}});
+      else complete.push({id, have, files:rec.files, byShot:rec.byShot});
+    }
+    const typos=collectF3Typos(A, P, slash);
+    last={mode:"f3", A, P, excel:[], complete, incomplete, onlyA, onlyP, checkList, shotCols, typos, badFormat:P.badFormat||[], showUnknown, showFmt, defect:null};
+    document.getElementById("kpis").innerHTML=`
+      <div class="kpi"><b>${A.uniq.length}</b><span>A 樹數</span></div>
+      <div class="kpi"><b>${complete.length}</b><span>有齊 3 張</span></div>
+      <div class="kpi"><b>${incomplete.length}</b><span>欠相</span></div>
+      <div class="kpi"><b>${onlyA.length}</b><span>只在 A</span></div>
+      <div class="kpi"><b>${onlyP.length}</b><span>只在 B</span></div>
+      <div class="kpi"><b>${typos.length}</b><span>疑似錯字</span></div>
+      <div class="kpi"><b>${(P.badFormat||[]).length}</b><span>格式唔啱</span></div>`;
+    const w=document.getElementById("warnNoUnderscore"); if(w){ w.style.display="none"; w.innerHTML=""; }
+    renderF3Matrix(checkList, P, shotCols);
+    renderDefect(null);
+    renderFolders(null);
+    const pr=document.getElementById("p-rename"); if(pr) pr.innerHTML="";
+    const pf=document.getElementById("p-fmt"); if(pf) pf.innerHTML="";
+    const pd=document.getElementById("p-diff"); if(pd) pd.innerHTML="";
+    renderF3Lists({complete, incomplete, onlyA, onlyP, P, A, showUnknown, checkList, shotCols, typos, badFormat:P.badFormat||[]});
+    const mtxTab=document.querySelector('.tab[data-p="matrix"]');
+    if(mtxTab) tab(mtxTab);
     return;
   }
 
