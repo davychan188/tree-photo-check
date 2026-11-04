@@ -173,6 +173,8 @@ function sortId(a,b){ return String(a).localeCompare(String(b),"en",{numeric:tru
 function extOf(line){ const m=String(line).trim().match(/(\.[A-Za-z0-9]{1,5})$/); return m?m[1].toLowerCase():""; }
 function stripExt(s){
   s = String(s).replace(/\\/g,"/").split("/").pop();
+  // Treat Unicode dashes as ASCII hyphen so T28–Tag / T28—Tag parse like T28-Tag
+  s = s.replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, "-");
   return s.replace(/(\.[A-Za-z0-9]{1,5})+$/i, "");
 }
 function normalizeInputLine(raw){
@@ -1477,11 +1479,24 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
   const treesFromA = (A.rows && A.rows.length) ? uniqueInOrder(A.rows) : (A.uniq.length ? A.uniq.slice() : []);
 
   // Build work list: if Excel has IDs, use those; else pair by order with list A
+  // Same tree on multiple C rows (common Excel paste) → merge defect parts into one job
+  // so exact multiset match works like a single "Leaning, Wilted" cell.
   const jobs=[];
   if(hasIds){
+    const byId={};
     excel.forEach((r,i)=>{
       if(!r) return;
-      jobs.push({id:r.id||"", excel:r.defect||"", excelIdx:i});
+      if(!r.id){
+        jobs.push({id:"", excel:r.defect||"", excelIdx:i});
+        return;
+      }
+      if(!byId[r.id]) byId[r.id]={parts:[], idxs:[]};
+      byId[r.id].idxs.push(i);
+      if(r.defect) splitDefectParts(r.defect).forEach(p=>byId[r.id].parts.push(p));
+    });
+    Object.keys(byId).sort(sortId).forEach(id=>{
+      const g=byId[id];
+      jobs.push({id, excel:g.parts.join(", "), excelIdx:g.idxs[0], excelIdxs:g.idxs});
     });
     // Trees with photos (or in A) but no Excel row → 有缺陷相無 C
     const excelIds=new Set(excel.map(r=>r.id).filter(Boolean));
@@ -1528,6 +1543,7 @@ function buildDefectCompare(A, P, excel, checkList, skipStd){
       collectTypoHits(id, "B", p.suf, typos, typoSeen);
     });
     if(j.excelIdx>=0) usedExcel.add(j.excelIdx);
+    (j.excelIdxs||[]).forEach(ix=>{ if(ix>=0) usedExcel.add(ix); });
 
     if(!id && excelText){ noPhoto.push({id:"(無樹號)", excel:excelText, photos:[]}); return; }
     if(id && !excelText){
@@ -1578,7 +1594,7 @@ function renderDefect(D){
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷用逗號分隔時須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷可用逗號寫喺同一格，或同一樹號多行；合併後須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
@@ -2010,7 +2026,8 @@ function renderMatrix(checkList, P, opt){
         const tip = esc((d.type||"") + " ← " + (d.line||""));
         html+=`<td class="cell-oth" title="${tip}">✓</td>`;
       } else {
-        html+=`<td class="cell-no"></td>`;
+        // Empty Defect slot is normal (not every tree has Defect N) — do not mark amber "missing"
+        html+=`<td></td>`;
       }
     }
     html+="</tr>";
