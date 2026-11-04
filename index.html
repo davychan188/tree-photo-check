@@ -114,7 +114,7 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
       <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。2↔3：C 貼「樹號 + 缺陷」，B 用 TG-T0175_Co-dominant branches 呢類對比（略過 Tag／Crown 等）。</div>
-      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾。1↔2 矩陣：每棵樹最少要有 1 張缺陷相，冇就 Defect 1／樹號標橙</div>
+      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾。1↔2 矩陣：每棵樹最少要有 1 張缺陷相，冇就 Defect 1／樹號標橙。檔名係 <code>Trunk</code>（唔係 <code>Trunk base</code>）會提示，唔會當標準 Trunk base</div>
     </div>
     <div class="card" id="cardC">
       <label>C Excel（樹號 + 缺陷）</label>
@@ -329,11 +329,16 @@ function parsePhotos(text, slash, filterJunk){
   }
 
   const noUnderscore=[];
+  const bareTrunk=[];
   for(const it of items){
     // Expect treeId_suffix — flag space, hyphen, or glued (no separator)
     if(!it.fmt || it.fmt.join !== "_"){
       const why = !it.fmt.join ? "樹號後無 _（黏住或缺分隔）" : (it.fmt.join===" " ? "樹號後係空格，唔係 _" : (it.fmt.join==="-" ? "樹號後係 -，唔係 _" : "樹號後唔係 _"));
       noUnderscore.push(why + " ← " + it.line);
+    }
+    // Bare "Trunk" is not standard "Trunk base" — tip only; still counts as defect/other
+    if(it.type === "Trunk"){
+      bareTrunk.push(it.id + "  |  Trunk ← " + it.line + "（若要標準角度請改 Trunk base）");
     }
   }
 
@@ -405,7 +410,7 @@ function parsePhotos(text, slash, filterJunk){
     .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
 
   return {
-    items, byTree, unknown, junk, extCnt, extAll, rawN, noUnderscore,
+    items, byTree, unknown, junk, extCnt, extAll, rawN, noUnderscore, bareTrunk,
     trees:Object.keys(byTree).sort(sortId),
     sameFile, combined, minorityFiles, rename:[], fmtAlts, majorityTail
   };
@@ -1377,6 +1382,18 @@ function copyOnlyA(){ const rows=buildOnlyATSV(); copyToClipboard(rowsToTSV(rows
 function copyNoDefectPhoto(){ const rows=buildNoDefectPhotoTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 function copyMismatch(){ const rows=buildMismatchTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 function copyTypos(){ const rows=buildTyposTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function buildBareTrunkTSV(){
+  if(!last) run();
+  const rows=[["樹號","提示","檔名"]];
+  ((last.P&&last.P.bareTrunk)||[]).forEach(line=>{
+    // "ID  |  Trunk ← file（…）"
+    const m=String(line).match(/^(\S+)\s+\|\s+Trunk ← (.+?)（/);
+    if(m) rows.push([m[1], "Trunk ≠ Trunk base", m[2]]);
+    else rows.push(["", "Trunk ≠ Trunk base", line]);
+  });
+  return rows;
+}
+function copyBareTrunk(){ const rows=buildBareTrunkTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 
 /** Basename-only photo list for two-folder compare. Match key = uppercase full basename (so .JPG ≡ .jpg). */
 function parseFilenameList(text, filterJunk){
@@ -1594,12 +1611,13 @@ function renderDefect(D){
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷可用逗號寫喺同一格，或同一樹號多行；合併後須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷可用逗號寫喺同一格，或同一樹號多行；合併後須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。檔名只寫 Trunk（唔係 Trunk base）會提示。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
   html+=box("唔啱（C 有字但同 B 唔同）","miss", D.mismatch.map(line), "copyMismatch()");
   html+=box("疑似錯字","warn", (D.typos||[]).map(typoDisplayLine), "copyTypos()");
+  html+=box("提示：Trunk ≠ Trunk base","warn", D.bareTrunk||[], "copyBareTrunk()");
   html+=box("C 空白／無缺陷字（有樹號／有相）","miss", (D.blankExcel||[]).map(line));
   html+=box("有 C 無缺陷相","miss", D.noPhoto.map(line), "copyNoDefectPhoto()");
   html+=box("有缺陷相無 C","extra", D.noExcel.map(line));
@@ -1931,6 +1949,7 @@ function run(){
     P.trees.forEach(id=>{ if(!mtxList.includes(id)) mtxList.push(id); });
     const typos=collectAllTypos(A, P, excel, slash);
     defect.typos=typos;
+    defect.bareTrunk=P.bareTrunk||[];
     last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,typos,complete:[],incomplete:[],showUnknown,showFmt};
     const noU=(P.noUnderscore||[]).length;
     const blankN=(defect.blankExcel||[]).length;
@@ -1941,6 +1960,7 @@ function run(){
       <div class="kpi"><b>${defect.matched.length}</b><span>對上</span></div>
       <div class="kpi"><b>${defect.mismatch.length}</b><span>唔啱</span></div>
       <div class="kpi"><b>${typoN}</b><span>疑似錯字</span></div>
+      <div class="kpi"><b>${(P.bareTrunk||[]).length}</b><span>Trunk≠base</span></div>
       <div class="kpi"><b>${blankN}</b><span>C 空白</span></div>
       <div class="kpi"><b>${defect.noPhoto.length}</b><span>有 C 無缺陷相</span></div>
       <div class="kpi"><b>${defect.noExcel.length}</b><span>有缺陷相無 C</span></div>
@@ -1982,6 +2002,7 @@ function run(){
     <div class="kpi"><b>${onlyP.length}</b><span>只在 B（相片）</span></div>
     <div class="kpi"><b>${incomplete.length}</b><span>欠相片</span></div>
     <div class="kpi"><b>${typos.length}</b><span>疑似錯字</span></div>
+    <div class="kpi"><b>${(P.bareTrunk||[]).length}</b><span>Trunk≠base</span></div>
     <div class="kpi"><b>${noU}</b><span>樹號後無 _</span></div>`;
   warnNoUnderscore(P);
   if(noU) alert("有 "+noU+" 個檔名喺樹號後面冇用 _ 分隔，請睇下方紅色提示。");
@@ -2113,6 +2134,7 @@ function renderLists(S){
   const typoLines=(S.typos||[]).map(typoDisplayLine);
   html+='<div class="grid" style="margin-top:12px">';
   html+=box("疑似錯字","warn", typoLines, "copyTypos()");
+  html+=box("提示：Trunk ≠ Trunk base","warn", (S.P&&S.P.bareTrunk)||[], "copyBareTrunk()");
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
