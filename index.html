@@ -114,7 +114,7 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
       <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。2↔3：C 貼「樹號 + 缺陷」，B 用 TG-T0175_Co-dominant branches 呢類對比（略過 Tag／Crown 等）。</div>
-      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾</div>
+      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾。1↔2 矩陣：每棵樹最少要有 1 張缺陷相，冇就 Defect 1／樹號標橙</div>
     </div>
     <div class="card" id="cardC">
       <label>C Excel（樹號 + 缺陷）</label>
@@ -1966,9 +1966,11 @@ function run(){
     const rec=P.byTree[id];
     const have=rec?Array.from(rec.types):[];
     const miss=NEED.filter(t=>!have.includes(t));
-    if(!rec) incomplete.push({id,miss:NEED.slice(),have:[],extras:[],files:[]});
-    else if(!miss.length) complete.push({id,have,extras:rec.extras,files:rec.files,byNeed:rec.byNeed});
-    else incomplete.push({id,miss,have,extras:rec.extras||[],files:rec.files,byNeed:rec.byNeed});
+    const defCount=rec && rec.defects ? rec.defects.length : 0;
+    // Every tree needs ≥1 defect photo; empty Defect 1 counts as incomplete
+    if(defCount===0) miss.push("Defect");
+    if(!rec || miss.length) incomplete.push({id,miss,have,extras:rec?rec.extras||[]:[],files:rec?rec.files:[],byNeed:rec?rec.byNeed:{}});
+    else complete.push({id,have,extras:rec.extras,files:rec.files,byNeed:rec.byNeed});
   }
   const typos=collectAllTypos(A, P, excel, slash);
   last={mode:"four", A,P,excel,complete,incomplete,onlyA,onlyP,checkList,showUnknown,showFmt,defect:null,typos};
@@ -1996,6 +1998,8 @@ function run(){
 function renderMatrix(checkList, P, opt){
   opt = opt || {};
   // Non-standard photos → Defect 1, Defect 2… (no description in column headers)
+  // Rule: every tree needs ≥1 defect photo. Always show Defect 1; amber only empty Defect 1
+  // (not empty Defect 2+ padded because another tree has more defects).
   let maxDef = 0;
   checkList.forEach(id=>{
     const rec=P.byTree[id];
@@ -2003,6 +2007,7 @@ function renderMatrix(checkList, P, opt){
     if(n > maxDef) maxDef = n;
   });
   if(maxDef > 8) maxDef = 8;
+  if(maxDef < 1) maxDef = 1;
   const defectHeads = [];
   for(let i=1;i<=maxDef;i++) defectHeads.push("Defect "+i);
   const heads=["樹號",...NEED,...defectHeads];
@@ -2012,7 +2017,8 @@ function renderMatrix(checkList, P, opt){
   checkList.forEach(id=>{
     const rec=P.byTree[id];
     const needCounts=NEED.map(t=>rec&&rec.byNeed[t]?rec.byNeed[t].length:(rec&&rec.typeCnt[t]?rec.typeCnt[t]:0));
-    const hasMiss=needCounts.some(n=>n===0);
+    const defCount=rec && rec.defects ? rec.defects.length : 0;
+    const hasMiss=needCounts.some(n=>n===0) || defCount===0;
     html+=`<tr><td class="id${hasMiss?' id-miss':''}">${esc(id)}</td>`;
     NEED.forEach((t,i)=>{
       const n=needCounts[i];
@@ -2025,14 +2031,17 @@ function renderMatrix(checkList, P, opt){
       if(d){
         const tip = esc((d.type||"") + " ← " + (d.line||""));
         html+=`<td class="cell-oth" title="${tip}">✓</td>`;
+      } else if(i===0){
+        // Defect 1 required — amber when missing
+        html+=`<td class="cell-no">—</td>`;
       } else {
-        // Empty Defect slot is normal (not every tree has Defect N) — do not mark amber "missing"
+        // Empty Defect 2+ is normal padding — not amber
         html+=`<td></td>`;
       }
     }
     html+="</tr>";
   });
-  html+="</tbody></table></div><div class='hint'>橙色數字 = 標準四張同一角度多於一張。藍色 Defect 1／2… = 第 5、6 張缺陷相（滑鼠移上去睇檔名）。左右／上下捲動時，樹號欄同 Tag／Whole view 等欄名會鎖住。</div></div>";
+  html+="</tbody></table></div><div class='hint'>橙色 —／樹號 = 欠標準四張，或欠缺陷相（最少要 1 張；空 Defect 1 會橙）。橙色數字 = 標準四張同一角度多於一張。藍色 Defect 1／2… = 缺陷相（滑鼠移上去睇檔名；空 Defect 2+ 唔算欠）。左右／上下捲動時，樹號欄同 Tag／Whole view 等欄名會鎖住。</div></div>";
   document.getElementById("p-matrix").innerHTML=html;
 }
 
@@ -2245,7 +2254,7 @@ function dlBat(){
 function dl(){
   if(!last) run();
   const rows=[["類別","樹號","欠哪些","已有／備註"]];
-  last.complete.forEach(x=>rows.push(["四張齊全",x.id,"",NEED.join("、")]));
+  last.complete.forEach(x=>rows.push(["齊全（四張+Defect）",x.id,"",NEED.join("、")+"、Defect"]));
   last.incomplete.forEach(x=>rows.push(["欠相片",x.id,x.miss.join("、"),x.have.join("、")]));
   last.onlyA.forEach(x=>rows.push(["只在A",x,NEED.join("、"),""]));
   last.onlyP.forEach(x=>rows.push(["只在B相片",x,"",Array.from(last.P.byTree[x].types).join("、")]));
