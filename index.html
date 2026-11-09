@@ -114,7 +114,7 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
         <input id="folderPick" type="file" multiple webkitdirectory directory style="display:none" onchange="filesToBox(event,'listB',true)">
       </div>
       <div class="path-note">只讀檔名，唔會上載。可貼 Explorer「複製為路徑」。2↔3：C 貼「樹號 + 缺陷」，B 用 TG-T0175_Co-dominant branches 呢類對比（略過 Tag／Crown 等）。</div>
-      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾。1↔2 矩陣：每棵樹最少要有 1 張缺陷相，冇就 Defect 1／樹號標橙。檔名係 <code>Trunk</code>（唔係 <code>Trunk base</code>）會提示，唔會當標準 Trunk base</div>
+      <div class="hint">支援檔名或完整路徑（含引號）；缺陷相例如 TG-T0201_Wilted.jpg；亦可拖資料夾。1↔2 矩陣：每棵樹最少要有 1 張缺陷相，冇就 Defect 1／樹號標橙。檔名係 <code>Trunk</code>（唔係 <code>Trunk base</code>）會提示，唔會當標準 Trunk base。同一角度大細楷唔一樣（例如 <code>Trunk base</code>／<code>Trunk Base</code>）會列「大細楷唔一致」</div>
     </div>
     <div class="card" id="cardC">
       <label>C Excel（樹號 + 缺陷）</label>
@@ -342,6 +342,36 @@ function parsePhotos(text, slash, filterJunk){
     }
   }
 
+  // Same angle phrase, different letter case across B (e.g. Trunk base vs Trunk Base) — tip only
+  const caseByNorm={};
+  for(const it of items){
+    let exact=String((it.fmt&&it.fmt.typeFmt)||"").replace(/\s*[\(（]\s*\d+\s*[\)）]\s*$/u,"").replace(/\s+/g," ").trim();
+    if(!exact) continue;
+    const norm=exact.toUpperCase();
+    if(!caseByNorm[norm]) caseByNorm[norm]={};
+    if(!caseByNorm[norm][exact]) caseByNorm[norm][exact]={n:0,files:[]};
+    caseByNorm[norm][exact].n++;
+    caseByNorm[norm][exact].files.push({id:it.id,line:it.line,casing:exact});
+  }
+  const caseInconsistent=[];
+  Object.keys(caseByNorm).sort(sortId).forEach(norm=>{
+    const casings=caseByNorm[norm];
+    const variants=Object.keys(casings);
+    if(variants.length<2) return;
+    let sorted=variants.slice().sort((a,b)=>casings[b].n-casings[a].n||a.localeCompare(b));
+    // On a count tie, prefer canonical STD spelling (Tag / Whole view / Trunk base / Crown)
+    const canon=NEED.find(n=>n.toUpperCase()===norm);
+    if(canon && casings[canon] && casings[canon].n===casings[sorted[0]].n && sorted[0]!==canon){
+      sorted=[canon].concat(sorted.filter(c=>c!==canon));
+    }
+    const maj=sorted[0], majN=casings[maj].n;
+    sorted.slice(1).forEach(c=>{
+      casings[c].files.slice().sort((a,b)=>sortId(a.id,b.id)||sortId(a.line,b.line)).forEach(f=>{
+        caseInconsistent.push(f.id+"  |  「"+f.casing+"」← "+f.line+"（多數寫「"+maj+"」×"+majN+"）");
+      });
+    });
+  });
+
   const fmtByType={};
   for(const it of items){
     const tk=it.type, k=it.fmt.key;
@@ -410,7 +440,7 @@ function parsePhotos(text, slash, filterJunk){
     .map(k=>fileCnt[k].sample+" ×"+fileCnt[k].n);
 
   return {
-    items, byTree, unknown, junk, extCnt, extAll, rawN, noUnderscore, bareTrunk,
+    items, byTree, unknown, junk, extCnt, extAll, rawN, noUnderscore, bareTrunk, caseInconsistent,
     trees:Object.keys(byTree).sort(sortId),
     sameFile, combined, minorityFiles, rename:[], fmtAlts, majorityTail
   };
@@ -1394,6 +1424,18 @@ function buildBareTrunkTSV(){
   return rows;
 }
 function copyBareTrunk(){ const rows=buildBareTrunkTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
+function buildCaseInconsistentTSV(){
+  if(!last) run();
+  const rows=[["樹號","寫法","檔名","多數寫法"]];
+  ((last.P&&last.P.caseInconsistent)||[]).forEach(line=>{
+    // ID  |  「casing」← file（多數寫「maj」×N）
+    const m=String(line).match(/^(\S+)\s+\|\s+「(.+?)」←\s+(.+?)（多數寫「(.+?)」/);
+    if(m) rows.push([m[1], m[2], m[3], m[4]]);
+    else rows.push(["","","",line]);
+  });
+  return rows;
+}
+function copyCaseInconsistent(){ const rows=buildCaseInconsistentTSV(); copyToClipboard(rowsToTSV(rows), Math.max(0,rows.length-1)); }
 
 /** Basename-only photo list for two-folder compare. Match key = uppercase full basename (so .JPG ≡ .jpg). */
 function parseFilenameList(text, filterJunk){
@@ -1611,13 +1653,14 @@ function renderDefect(D){
     return `${o.id}  |  C: ${o.excel||"—"}  |  B_後: ${ph}`;
   };
   let html=`<div class="card"><h3 class="info">2↔3 結果（B 相片 ↔ C Excel）</h3>
-    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷可用逗號寫喺同一格，或同一樹號多行；合併後須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。檔名只寫 Trunk（唔係 Trunk base）會提示。</p>
+    <p class="hint">C 每行「樹號 + 缺陷」用樹號對 B；再比相片 <code>_</code> 後文字（正規化後須完全一致：大小寫／標點／空格／底線可忽略；單複數唔同就算唔啱；C 多個缺陷可用逗號寫喺同一格，或同一樹號多行；合併後須同 B 各張一一對上）。若 C 無樹號，退回同 A 次序對。勾選時略過 Tag／Whole view／Trunk base／Crown。A／B／C 都會檢查疑似錯字。檔名只寫 Trunk（唔係 Trunk base）會提示。同一角度大細楷唔一樣（例如 Trunk base／Trunk Base）會列喺「大細楷唔一致」。</p>
     <p class="hint">C 樹號 ${D.treeCount}　／　C 行 ${D.excelCount}　／　${D.pairedById?'按樹號對':'按次序對'}${(!D.pairedById && D.treeCount!==D.excelCount)?' <b class="miss">行數唔同</b>':''}</p>
   </div><div class="grid">`;
   html+=box("對上（B 嘅 _後 = C 嘅缺陷）","ok", D.matched.map(line));
   html+=box("唔啱（C 有字但同 B 唔同）","miss", D.mismatch.map(line), "copyMismatch()");
   html+=box("疑似錯字","warn", (D.typos||[]).map(typoDisplayLine), "copyTypos()");
   html+=box("提示：Trunk ≠ Trunk base","warn", D.bareTrunk||[], "copyBareTrunk()");
+  html+=box("大細楷唔一致","warn", D.caseInconsistent||[], "copyCaseInconsistent()");
   html+=box("C 空白／無缺陷字（有樹號／有相）","miss", (D.blankExcel||[]).map(line));
   html+=box("有 C 無缺陷相","miss", D.noPhoto.map(line), "copyNoDefectPhoto()");
   html+=box("有缺陷相無 C","extra", D.noExcel.map(line));
@@ -1950,6 +1993,7 @@ function run(){
     const typos=collectAllTypos(A, P, excel, slash);
     defect.typos=typos;
     defect.bareTrunk=P.bareTrunk||[];
+    defect.caseInconsistent=P.caseInconsistent||[];
     last={mode:"defect", A,P,excel,checkList:mtxList,onlyA,onlyP,defect,typos,complete:[],incomplete:[],showUnknown,showFmt};
     const noU=(P.noUnderscore||[]).length;
     const blankN=(defect.blankExcel||[]).length;
@@ -2135,6 +2179,7 @@ function renderLists(S){
   html+='<div class="grid" style="margin-top:12px">';
   html+=box("疑似錯字","warn", typoLines, "copyTypos()");
   html+=box("提示：Trunk ≠ Trunk base","warn", (S.P&&S.P.bareTrunk)||[], "copyBareTrunk()");
+  html+=box("大細楷唔一致","warn", (S.P&&S.P.caseInconsistent)||[], "copyCaseInconsistent()");
   html+="</div>";
   if(S.showUnknown){
     html+='<div class="grid" style="margin-top:12px">';
