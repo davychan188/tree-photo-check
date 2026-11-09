@@ -148,6 +148,7 @@ table.mtx td.cell-oth,table.mtx tr:nth-child(even) td.cell-oth,table.mtx tr:hove
   <div class="btns">
     <button class="btn" onclick="run()">檢查</button>
     <button class="btn btn2" onclick="clearAll()">清空</button>
+    <button class="btn btn2" type="button" onclick="exportExcel()" title="匯出當前模式結果為 .xlsx">匯出 Excel</button>
   </div>
   <div class="kpis" id="kpis"></div>
   <div id="warnNoUnderscore" style="display:none;margin:12px 0"></div>
@@ -2289,6 +2290,278 @@ function copyShort(){
   const t=shortText();
   copyToClipboard(t, String(t).split(/\n/).length);
 }
+
+/** Minimal store-only ZIP + XLSX (no CDN; offline OK). sheets: [{name, rows}] */
+const _CRC_TABLE=(function(){
+  const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){
+    let c=n;
+    for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320^(c>>>1)) : (c>>>1);
+    t[n]=c>>>0;
+  }
+  return t;
+})();
+function crc32Bytes(u8){
+  let c=0xFFFFFFFF;
+  for(let i=0;i<u8.length;i++) c=_CRC_TABLE[(c^u8[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function u8FromStr(s){
+  return new TextEncoder().encode(s);
+}
+function concatU8(parts){
+  let n=0; parts.forEach(p=>n+=p.length);
+  const out=new Uint8Array(n); let o=0;
+  parts.forEach(p=>{ out.set(p,o); o+=p.length; });
+  return out;
+}
+function u16le(n){ return new Uint8Array([n&255,(n>>>8)&255]); }
+function u32le(n){ return new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]); }
+function zipStoreFiles(files){
+  // files: [{name:asciiPath, data:Uint8Array}]
+  const locals=[], centrals=[];
+  let offset=0;
+  files.forEach(f=>{
+    const name=u8FromStr(f.name);
+    const data=f.data;
+    const crc=crc32Bytes(data);
+    const local=concatU8([
+      u32le(0x04034b50), u16le(20), u16le(0), u16le(0),
+      u16le(0), u16le(0), u32le(crc), u32le(data.length), u32le(data.length),
+      u16le(name.length), u16le(0), name, data
+    ]);
+    locals.push(local);
+    const central=concatU8([
+      u32le(0x02014b50), u16le(20), u16le(20), u16le(0), u16le(0),
+      u16le(0), u16le(0), u32le(crc), u32le(data.length), u32le(data.length),
+      u16le(name.length), u16le(0), u16le(0), u16le(0), u16le(0),
+      u32le(0), u32le(offset), name
+    ]);
+    centrals.push(central);
+    offset += local.length;
+  });
+  const centralBlob=concatU8(centrals);
+  const end=concatU8([
+    u32le(0x06054b50), u16le(0), u16le(0),
+    u16le(files.length), u16le(files.length),
+    u32le(centralBlob.length), u32le(offset), u16le(0)
+  ]);
+  return concatU8([...locals, centralBlob, end]);
+}
+function xlsxEscXml(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]));
+}
+function xlsxColName(i){
+  let n=i+1, s="";
+  while(n>0){ n--; s=String.fromCharCode(65+(n%26))+s; n=(n/26)|0; }
+  return s;
+}
+function xlsxSafeSheetName(name, used){
+  let s=String(name||"Sheet").replace(/[\\/?*\[\]:]/g," ").trim() || "Sheet";
+  if(s.length>31) s=s.slice(0,31);
+  let base=s, n=2;
+  while(used.has(s.toLowerCase())){
+    const suf=" "+n++;
+    s=(base.slice(0, Math.max(1,31-suf.length))+suf);
+  }
+  used.add(s.toLowerCase());
+  return s;
+}
+function sheetToXml(rows){
+  let xml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  xml+='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+  (rows||[]).forEach((row,ri)=>{
+    xml+='<row r="'+(ri+1)+'">';
+    (row||[]).forEach((cell,ci)=>{
+      const ref=xlsxColName(ci)+(ri+1);
+      const v=cell==null?"":String(cell);
+      xml+='<c r="'+ref+'" t="inlineStr"><is><t>'+xlsxEscXml(v)+'</t></is></c>';
+    });
+    xml+='</row>';
+  });
+  xml+='</sheetData></worksheet>';
+  return xml;
+}
+function buildXlsxBytes(sheets){
+  const used=new Set();
+  const names=[];
+  const files=[];
+  files.push({name:"[Content_Types].xml", data:null}); // fill later
+  files.push({name:"_rels/.rels", data:u8FromStr(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'+
+    '</Relationships>'
+  )});
+  let wbSheets="", wbRels="";
+  const contentTypes=[
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+  ];
+  (sheets||[]).forEach((sh,i)=>{
+    const nm=xlsxSafeSheetName(sh.name, used);
+    names.push(nm);
+    const sid=i+1;
+    const path="xl/worksheets/sheet"+sid+".xml";
+    files.push({name:path, data:u8FromStr(sheetToXml(sh.rows||[]))});
+    contentTypes.push('<Override PartName="/'+path+'" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+    wbSheets+='<sheet name="'+xlsxEscXml(nm)+'" sheetId="'+sid+'" r:id="rId'+sid+'"/>';
+    wbRels+='<Relationship Id="rId'+sid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+sid+'.xml"/>';
+  });
+  if(!names.length){
+    // at least one empty sheet
+    return buildXlsxBytes([{name:"空白", rows:[["（未有結果）"]]}]);
+  }
+  files.push({name:"xl/workbook.xml", data:u8FromStr(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+wbSheets+'</sheets></workbook>'
+  )});
+  files.push({name:"xl/_rels/workbook.xml.rels", data:u8FromStr(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+wbRels+'</Relationships>'
+  )});
+  files[0].data=u8FromStr(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+contentTypes.join("")+'</Types>'
+  );
+  return zipStoreFiles(files);
+}
+function downloadBlob(name, blob){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+function excelDateStamp(){
+  const d=new Date();
+  const p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate());
+}
+function matrixRowsFromLast(){
+  if(!last||!last.P) return [["樹號"]];
+  const P=last.P;
+  const checkList=last.checkList||P.trees||[];
+  let maxDef=0;
+  checkList.forEach(id=>{
+    const rec=P.byTree[id];
+    const n=rec&&rec.defects?rec.defects.length:0;
+    if(n>maxDef) maxDef=n;
+  });
+  if(maxDef>8) maxDef=8;
+  if(maxDef<1) maxDef=1;
+  const heads=["樹號",...NEED];
+  for(let i=1;i<=maxDef;i++) heads.push("Defect "+i);
+  const rows=[heads];
+  checkList.forEach(id=>{
+    const rec=P.byTree[id];
+    const row=[id];
+    NEED.forEach(t=>{
+      const n=rec&&rec.byNeed&&rec.byNeed[t]?rec.byNeed[t].length:(rec&&rec.typeCnt&&rec.typeCnt[t]?rec.typeCnt[t]:0);
+      if(n===1) row.push("✓");
+      else if(n>1) row.push(String(n));
+      else row.push("—");
+    });
+    for(let i=0;i<maxDef;i++){
+      const d=rec&&rec.defects?rec.defects[i]:null;
+      if(d) row.push("✓");
+      else if(i===0) row.push("—");
+      else row.push("");
+    }
+    rows.push(row);
+  });
+  return rows;
+}
+function f3MatrixRowsFromLast(){
+  if(!last||!last.P) return [["樹號"]];
+  const cols=last.shotCols&&last.shotCols.length?last.shotCols:["F1-01","F1-02","F1-03"];
+  const rows=[["樹號",...cols]];
+  (last.checkList||[]).forEach(id=>{
+    const rec=last.P.byTree[id];
+    const row=[id];
+    cols.forEach(c=>{
+      const n=rec&&rec.shotCnt&&rec.shotCnt[c]?rec.shotCnt[c]:0;
+      if(n===1) row.push("✓");
+      else if(n>1) row.push(String(n));
+      else row.push("—");
+    });
+    rows.push(row);
+  });
+  return rows;
+}
+function linesToSheet(header, lines){
+  const rows=[header];
+  (lines||[]).forEach(line=>{
+    if(Array.isArray(line)) rows.push(line);
+    else rows.push([String(line)]);
+  });
+  if(rows.length===1) rows.push(["（無）"]);
+  return rows;
+}
+function exportExcel(){
+  if(!last) run();
+  if(!last){ alert("未有結果，請先撳檢查。"); return; }
+  const sheets=[];
+  const mode=last.mode||"";
+  const stamp=excelDateStamp();
+  let fname="tree-photo-check-"+stamp+".xlsx";
+
+  if(mode==="folders"){
+    fname="tree-folders-"+stamp+".xlsx";
+    const F=last.folders||{};
+    sheets.push({name:"兩邊都有", rows:linesToSheet(["檔名"], F.both||[])});
+    sheets.push({name:"只喺資料夾1", rows:linesToSheet(["檔名"], F.only1||[])});
+    sheets.push({name:"只喺資料夾2", rows:linesToSheet(["檔名"], F.only2||[])});
+    const junk=[].concat((F.F1&&F.F1.junk)||[], (F.F2&&F.F2.junk)||[]);
+    if(junk.length) sheets.push({name:"過濾檔", rows:linesToSheet(["內容"], junk)});
+  } else if(mode==="f3"){
+    fname="tree-f3-"+stamp+".xlsx";
+    sheets.push({name:"矩陣", rows:f3MatrixRowsFromLast()});
+    sheets.push({name:"欠相片", rows:buildMissingPhotoTSV()});
+    sheets.push({name:"只在A", rows:buildOnlyATSV()});
+    if((last.onlyP||[]).length) sheets.push({name:"只在B", rows:linesToSheet(["樹號"], last.onlyP)});
+    sheets.push({name:"疑似錯字", rows:buildTyposTSV()});
+    if((last.badFormat||[]).length) sheets.push({name:"格式唔啱", rows:linesToSheet(["檔名"], last.badFormat)});
+  } else if(mode==="defect"){
+    fname="tree-defect-"+stamp+".xlsx";
+    sheets.push({name:"缺陷對比", rows:defectRows()});
+    sheets.push({name:"矩陣", rows:matrixRowsFromLast()});
+    sheets.push({name:"唔啱", rows:buildMismatchTSV()});
+    sheets.push({name:"疑似錯字", rows:buildTyposTSV()});
+    sheets.push({name:"Trunk≠base", rows:buildBareTrunkTSV()});
+    sheets.push({name:"大細楷", rows:buildCaseInconsistentTSV()});
+    sheets.push({name:"有C無缺陷相", rows:buildNoDefectPhotoTSV()});
+    if(last.defect){
+      const blank=(last.defect.blankExcel||[]).map(o=>[o.id||"", o.excel||""]);
+      sheets.push({name:"C空白", rows:linesToSheet(["樹號","C 缺陷"], blank)});
+      const noEx=(last.defect.noExcel||[]).map(o=>{
+        const ph=(o.suffixes||(o.photos||[]).map(p=>p.suf||p)).filter(Boolean).join(" | ");
+        return [o.id||"", ph];
+      });
+      sheets.push({name:"有缺陷相無C", rows:linesToSheet(["樹號","B_後"], noEx)});
+    }
+  } else {
+    // 1↔2 matrix / four
+    fname="tree-matrix-"+stamp+".xlsx";
+    sheets.push({name:"矩陣", rows:matrixRowsFromLast()});
+    sheets.push({name:"欠相片", rows:buildMissingPhotoTSV()});
+    sheets.push({name:"只在A", rows:buildOnlyATSV()});
+    if((last.onlyP||[]).length) sheets.push({name:"只在B", rows:linesToSheet(["樹號"], last.onlyP)});
+    sheets.push({name:"Trunk≠base", rows:buildBareTrunkTSV()});
+    sheets.push({name:"大細楷", rows:buildCaseInconsistentTSV()});
+    sheets.push({name:"疑似錯字", rows:buildTyposTSV()});
+    if(last.showUnknown && last.P){
+      if((last.P.unknown||[]).length) sheets.push({name:"無法抽樹號", rows:linesToSheet(["檔名"], last.P.unknown)});
+      if((last.P.noUnderscore||[]).length) sheets.push({name:"樹號後無_", rows:linesToSheet(["內容"], last.P.noUnderscore)});
+    }
+  }
+
+  // Drop sheets that are only header + （無） optional? Keep them so user sees empty categories.
+  const bytes=buildXlsxBytes(sheets);
+  downloadBlob(fname, new Blob([bytes], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+}
+
 function download(name, text){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob(["\uFEFF"+text],{type:"text/plain;charset=utf-8"}));
